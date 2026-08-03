@@ -21,8 +21,11 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-kayhan}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: ${POSTGRES_DB:-kayhan}
-      # Persian-aware collation for correct ORDER BY on Persian titles.
-      LANG: fa_IR.utf8
+      # Persian-aware collation via ICU, which ships with Postgres 17. A glibc
+      # `LANG=fa_IR.utf8` fails here — the Debian base image carries no Persian
+      # locale, and initdb aborts. ICU needs no system locale and sorts Persian
+      # correctly, including the alef/hamza forms glibc's C collation misorders.
+      POSTGRES_INITDB_ARGS: '--locale-provider=icu --icu-locale=fa-IR --locale=C.UTF-8 --encoding=UTF8'
     ports:
       - '5432:5432'
     volumes:

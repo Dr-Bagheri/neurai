@@ -42,9 +42,13 @@ export default buildConfig({
 
   db: postgresAdapter({
     pool: { connectionString: process.env.DATABASE_URI ?? '' },
-    // Migrations are generated and committed rather than pushed implicitly, so
-    // production schema changes are reviewable in a diff.
-    push: process.env.NODE_ENV === 'development',
+    // Always migrations, never implicit push — including in development.
+    //
+    // Two reasons: schema changes stay reviewable in a diff and behave
+    // identically in dev and production; and drizzle's push prompts for
+    // confirmation on an interactive TTY, so it hangs forever in a background
+    // process or a container. Run `pnpm migrate:create` then `pnpm migrate`.
+    push: false,
   }),
 
   plugins: [
