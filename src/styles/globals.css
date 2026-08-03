@@ -13,37 +13,41 @@
    ═══════════════════════════════════════════════════════════════════════════ */
 
 @theme {
-  /* ── 60% · Void ────────────────────────────────────────────────────────── */
-  --color-void-1000: #000000;
-  --color-void-950: #050408;
-  --color-void-900: #0a0810;
-  --color-void-800: #12101a;
+  /* ── 60% · Void ────────────────────────────────────────────────────────────
+     Not neutral black. Every void tone carries a slight red-brown cast, so the
+     dark areas read as *unlit warm space* rather than as absence of colour.
+     A neutral black under warm light looks like a printing error. */
+  --color-void-1000: #050303;
+  --color-void-950: #0a0706;
+  --color-void-900: #120d09;
+  --color-void-800: #1c150e;
 
-  /* ── 30% · Structure ───────────────────────────────────────────────────── */
-  --color-glass-1: oklch(1 0 0 / 3.5%);
-  --color-glass-2: oklch(1 0 0 / 5.5%);
-  --color-glass-3: oklch(1 0 0 / 9%);
-  --color-hairline: oklch(1 0 0 / 8%);
-  --color-hairline-strong: oklch(1 0 0 / 14%);
-  --color-text-100: #e9e4dc; /* warm off-white — primary text */
-  --color-text-200: #c4bfc6;
-  --color-text-300: #9a94a0; /* muted — secondary text, the "dimmed" half of two-tone headings */
-  --color-text-400: #6b6672;
-  --color-graphite-700: #333134;
+  /* ── 30% · Structure ───────────────────────────────────────────────────────
+     Warm-white glass and cream text. The alpha whites are tinted warm too —
+     pure white glass over a warm scene reads as a cold smear. */
+  --color-glass-1: oklch(0.97 0.02 75 / 4%);
+  --color-glass-2: oklch(0.97 0.02 75 / 6.5%);
+  --color-glass-3: oklch(0.97 0.02 75 / 10%);
+  --color-hairline: oklch(0.97 0.02 75 / 9%);
+  --color-hairline-strong: oklch(0.97 0.02 75 / 16%);
+  --color-text-100: #f4ead9; /* cream — primary text */
+  --color-text-200: #d6c6ae;
+  --color-text-300: #a89179; /* muted — the dimmed half of two-tone headings */
+  --color-text-400: #6f5c48;
+  --color-graphite-700: #2a211a;
 
-  /* ── 10% · Signal ──────────────────────────────────────────────────────── */
-  /* Ember — ambient lighting only. Never text, fill, or border. */
-  --color-ember-700: #7a3226;
-  --color-ember-600: #a54735;
-  --color-ember-400: #e8874f;
-  --color-ember-100: #eed7b3;
-  /* Firouzeh — the cool pole, and the single interactive accent. */
-  --color-lapis-900: #0d1430;
-  --color-lapis-700: #1c2c58;
-  --color-lapis-400: #3556a0;
-  --color-cyan-300: #9adaed;
-  --color-accent: #6fd3e8; /* links, focus rings, primary CTA, chat send */
-  --color-accent-dim: #3d8fa3;
+  /* ── 10% · Signal ──────────────────────────────────────────────────────────
+     One warm ramp, core → rim. There is no cool pole any more: nothing on the
+     page is allowed to be blue, so warmth reads as a decision rather than as
+     a default. */
+  --color-core-100: #fff4de; /* the galactic core — brightest thing on the page */
+  --color-gold-200: #ffd9a0;
+  --color-gold-400: #ffb454; /* the single interactive accent */
+  --color-copper-500: #e07b3c;
+  --color-ember-700: #9c4a18;
+  --color-ember-900: #4d2109;
+  --color-accent: #ffb454; /* links, focus rings, primary CTA, chat send */
+  --color-accent-dim: #b87a34;
 
   /* ── Type ──────────────────────────────────────────────────────────────────
      Three faces, each doing one job.
@@ -187,16 +191,19 @@
   inset: 0;
   pointer-events: none;
   z-index: -1;
+  /* Both sources are warm. As the journey advances we are flying deeper into
+     the galaxy, so the light gets *closer and hotter*, not cooler — the second
+     gradient grows rather than swapping hue. */
   background:
     radial-gradient(
-      60% 50% at calc(80% - var(--pointer-x) * 4%) 0%,
-      color-mix(in oklab, var(--color-ember-600) calc(18% * (1 - var(--journey))), transparent)
+      62% 52% at calc(76% - var(--pointer-x) * 4%) 2%,
+      color-mix(in oklab, var(--color-copper-500) calc(16% * (1 - var(--journey) * 0.5)), transparent)
         0%,
       transparent 70%
     ),
     radial-gradient(
-      70% 60% at calc(15% + var(--pointer-x) * 4%) 100%,
-      color-mix(in oklab, var(--color-lapis-400) calc(20% * var(--journey)), transparent) 0%,
+      70% 62% at calc(22% + var(--pointer-x) * 4%) 98%,
+      color-mix(in oklab, var(--color-gold-400) calc(10% + 14% * var(--journey)), transparent) 0%,
       transparent 72%
     );
 }
@@ -330,20 +337,21 @@
    WebGL2 or with Save-Data on. The page must look finished with only this. */
 .cosmos-fallback {
   background:
-    /* warm source, upper-end of the page */
+    /* the core, centre-screen — grows and brightens as we fly inward */
     radial-gradient(
-      52% 42% at calc(78% - (var(--pointer-x) - 0.5) * 3%) calc(6% + var(--journey) * -6%),
-      color-mix(in oklab, #e8874f calc(22% * (1 - var(--journey))), transparent) 0%,
-      transparent 68%
+      calc(26% + var(--journey) * 46%) calc(26% + var(--journey) * 46%) at 50% 46%,
+      color-mix(in oklab, #fff4de calc(16% + 22% * var(--journey)), transparent) 0%,
+      color-mix(in oklab, #ffb454 calc(12% + 16% * var(--journey)), transparent) 34%,
+      transparent 72%
     ),
-    /* cool source, lower-start of the page */
+    /* warm halo, offset by the pointer for a little parallax */
     radial-gradient(
-      58% 48% at calc(18% + (var(--pointer-x) - 0.5) * 3%) calc(88% - var(--journey) * 10%),
-      color-mix(in oklab, #3556a0 calc(26% * (0.35 + var(--journey))), transparent) 0%,
+      70% 58% at calc(62% - (var(--pointer-x) - 0.5) * 4%) calc(30% - var(--journey) * 8%),
+      color-mix(in oklab, #e07b3c 16%, transparent) 0%,
       transparent 70%
     ),
-    /* deep field */
-    radial-gradient(120% 90% at 50% 40%, #0a0810 0%, #000000 78%);
+    /* deep warm field */
+    radial-gradient(130% 100% at 50% 46%, #120d09 0%, #050303 76%);
   transition: background 600ms var(--ease-cinematic);
 }
 
@@ -355,12 +363,12 @@
   position: absolute;
   inset: 0;
   background-image:
-    radial-gradient(1px 1px at 12% 22%, #e9e4dc 50%, transparent 50%),
-    radial-gradient(1px 1px at 78% 14%, #bcd6e8 50%, transparent 50%),
-    radial-gradient(1px 1px at 34% 68%, #f0dcc4 50%, transparent 50%),
-    radial-gradient(1px 1px at 62% 82%, #9adaed 50%, transparent 50%),
-    radial-gradient(1px 1px at 88% 54%, #e9e4dc 50%, transparent 50%),
-    radial-gradient(1px 1px at 22% 88%, #bcd6e8 50%, transparent 50%);
+    radial-gradient(1px 1px at 12% 22%, #f4ead9 50%, transparent 50%),
+    radial-gradient(1px 1px at 78% 14%, #ffd9a0 50%, transparent 50%),
+    radial-gradient(1px 1px at 34% 68%, #fff4de 50%, transparent 50%),
+    radial-gradient(1px 1px at 62% 82%, #e07b3c 50%, transparent 50%),
+    radial-gradient(1px 1px at 88% 54%, #f4ead9 50%, transparent 50%),
+    radial-gradient(1px 1px at 22% 88%, #ffd9a0 50%, transparent 50%);
   background-size: 340px 340px;
   background-repeat: repeat;
   opacity: 0.5;

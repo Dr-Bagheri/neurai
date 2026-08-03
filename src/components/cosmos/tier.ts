@@ -11,8 +11,6 @@ export type TierName = 'off' | 'low' | 'medium' | 'high'
 
 export type CosmosBudget = {
   tier: TierName
-  /** Points in the girih ring. */
-  girihCells: { cellsU: number; cellsV: number; pointsPerSegment: number }
   /** Stars per depth shell, far → near. */
   starCounts: readonly number[]
   /** Particles in the background spiral galaxy. */
@@ -29,31 +27,28 @@ export type CosmosBudget = {
 
 const BUDGETS: Record<Exclude<TierName, 'off'>, Omit<CosmosBudget, 'tier'>> = {
   high: {
-    // Dense enough that the strapwork reads as continuous luminous line rather
-    // than a dotted outline — that continuity is what makes the ring glow.
-    girihCells: { cellsU: 28, cellsV: 6, pointsPerSegment: 11 },
+    // The galaxy is the whole background and the camera flies inside it, so it
+    // has to hold up close. This is the one number worth spending on.
     starCounts: [2600, 1400, 700],
-    galaxyCount: 26000,
+    galaxyCount: 44000,
     maxPixelRatio: 2,
     bloom: true,
     targetFps: 60,
     interactive: true,
   },
   medium: {
-    girihCells: { cellsU: 22, cellsV: 5, pointsPerSegment: 7 },
     starCounts: [1500, 800, 380],
-    galaxyCount: 12000,
+    galaxyCount: 20000,
     maxPixelRatio: 1.75,
     bloom: true,
     targetFps: 60,
     interactive: true,
   },
   low: {
-    girihCells: { cellsU: 16, cellsV: 4, pointsPerSegment: 5 },
     starCounts: [700, 380, 0],
-    // Still present, just sparser — the galaxy is the main light source on the
-    // home page, so dropping it entirely would leave the page noticeably dead.
-    galaxyCount: 4500,
+    // Sparser, never absent — the galaxy *is* the design, so dropping it would
+    // leave nothing at all.
+    galaxyCount: 8000,
     maxPixelRatio: 1.25,
     bloom: false,
     targetFps: 30,

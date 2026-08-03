@@ -1,56 +1,58 @@
 /**
- * کهکشان — the spiral galaxy that sits behind everything on the home page.
+ * کهکشان — the galaxy. It is the entire background of the site.
  *
- * Particles are stored in *polar* form (radius, angle, height) rather than as
- * Cartesian positions, and the shader reconstructs xyz each frame. That is what
- * makes differential rotation possible: real galaxies rotate faster near the
- * core, so the arms trail and wind over time. Baking Cartesian positions would
- * force the whole disc to rotate rigidly, which reads as a spinning image
- * rather than as a galaxy.
+ * Particles are stored in *polar* form (radius, angle, height) and the shader
+ * reconstructs xyz every frame. That is what makes differential rotation
+ * possible: real discs rotate faster near the core, so arms trail and wind.
+ * Baking Cartesian positions would force rigid rotation, which reads as a
+ * spinning picture of a galaxy rather than as a galaxy.
+ *
+ * Because the camera flies *into* this thing on scroll, the structure has to
+ * survive close inspection — a background haze that looked fine at distance
+ * falls apart once you are inside it. Hence three distinct populations rather
+ * than one scatter: bulge, arms, and a sparse halo.
  */
 
 export type GalaxyOptions = {
   count: number
-  /** Number of spiral arms. Two or four; three looks unbalanced at rest. */
+  /** Spiral arms. Two reads as a classic barred spiral; four fills the frame better. */
   arms: number
-  /** Outer radius in world units. */
+  /** Outer radius, world units. */
   radius: number
-  /** How tightly the arms wind. Higher = more revolutions across the disc. */
+  /** Arm winding. Higher = more revolutions from core to rim. */
   spiral: number
-  /** Angular scatter of particles away from the arm centreline. */
+  /** Angular scatter away from the arm centreline. */
   scatter: number
-  /** Vertical thickness at the core. Falls off toward the rim. */
+  /** Disc thickness at the core, falling off toward the rim. */
   thickness: number
-  /** Fraction of particles placed in the central bulge rather than the arms. */
+  /** Share of particles in the central bulge. */
   coreFraction: number
+  /** Share of particles in the sparse outer halo. */
+  haloFraction: number
 }
 
 export const DEFAULT_GALAXY: GalaxyOptions = {
-  count: 20000,
-  arms: 4,
-  radius: 26,
-  spiral: 2.4,
-  scatter: 0.42,
-  thickness: 1.5,
-  coreFraction: 0.22,
+  count: 34000,
+  arms: 2,
+  radius: 30,
+  spiral: 2.15,
+  scatter: 0.38,
+  thickness: 2.2,
+  coreFraction: 0.2,
+  haloFraction: 0.12,
 }
 
 export type GalaxyCloud = {
-  /** Distance from the galactic centre, world units. */
   radius: Float32Array
-  /** Starting angle, radians. */
   angle: Float32Array
-  /** Height above the galactic plane. */
   height: Float32Array
-  /** Per-particle random, for twinkle and colour variation. */
   seed: Float32Array
+  /** 0 = bulge, 1 = arm, 2 = halo. Lets the shader treat each population differently. */
+  kind: Float32Array
   count: number
 }
 
-/**
- * Box–Muller. Uniform random scattered around an arm produces a hard-edged
- * band; a normal distribution gives the soft falloff arms actually have.
- */
+/** Box–Muller. Uniform scatter gives arms a hard edge; normal gives real falloff. */
 function gaussian(): number {
   let u = 0
   let v = 0
@@ -61,44 +63,89 @@ function gaussian(): number {
 
 export function buildGalaxy(options: Partial<GalaxyOptions> = {}): GalaxyCloud {
   const opts = { ...DEFAULT_GALAXY, ...options }
-  const { count, arms, radius, spiral, scatter, thickness, coreFraction } = opts
+  const { count, arms, radius, spiral, scatter, thickness, coreFraction, haloFraction } = opts
 
   const radiusArr = new Float32Array(count)
   const angleArr = new Float32Array(count)
   const heightArr = new Float32Array(count)
   const seedArr = new Float32Array(count)
+  const kindArr = new Float32Array(count)
 
   const coreCount = Math.floor(count * coreFraction)
+  const haloCount = Math.floor(count * haloFraction)
 
   for (let i = 0; i < count; i++) {
-    const inCore = i < coreCount
     let r: number
     let theta: number
+    let kind: number
+    let heightScale: number
 
-    if (inCore) {
-      // Central bulge: dense, roughly spherical, no arm structure.
-      r = Math.pow(Math.random(), 2.2) * radius * 0.16
+    if (i < coreCount) {
+      // Bulge: dense, near-spherical, no arm structure. This is what the
+      // camera ends up inside, so it needs real volume rather than a flat disc.
+      kind = 0
+      r = Math.pow(Math.random(), 2.4) * radius * 0.18
       theta = Math.random() * Math.PI * 2
+      heightScale = 0.85
+    } else if (i < coreCount + haloCount) {
+      // Halo: sparse, spherical, extends past the disc. Gives the galaxy an
+      // outer presence so the frame isn't empty before the fly-in starts.
+      kind = 2
+      r = radius * (0.55 + Math.random() * 0.75)
+      theta = Math.random() * Math.PI * 2
+      heightScale = 2.6
     } else {
-      // Disc: pow > 1 concentrates particles toward the centre, which is what
-      // gives a galaxy its bright core and sparse rim. A uniform radius would
-      // pile particles at the edge, since area grows with r².
-      r = Math.pow(Math.random(), 2.1) * radius
+      // Disc arms. pow > 1 concentrates toward the centre; uniform radius would
+      // pile particles at the rim, since area grows with r².
+      kind = 1
+      r = Math.pow(Math.random(), 1.9) * radius
       const arm = Math.floor(Math.random() * arms) * ((Math.PI * 2) / arms)
-      // Logarithmic spiral: angle advances with radius.
       const wind = (r / radius) * spiral * Math.PI * 2
-      // Scatter narrows with radius so arms stay defined far out instead of
-      // dissolving into an even haze.
-      theta = arm + wind + gaussian() * scatter * (1 - (r / radius) * 0.55)
+      // Scatter narrows outward so arms stay legible at the rim rather than
+      // dissolving into even haze.
+      theta = arm + wind + gaussian() * scatter * (1 - (r / radius) * 0.5)
+      heightScale = Math.max(0.1, 1 - r / radius)
     }
 
-    // Thin disc, thick bulge.
-    const heightFalloff = inCore ? 0.5 : Math.max(0.08, 1 - r / radius)
     radiusArr[i] = r
     angleArr[i] = theta
-    heightArr[i] = gaussian() * thickness * heightFalloff * 0.5
+    heightArr[i] = gaussian() * thickness * heightScale * 0.5
     seedArr[i] = Math.random()
+    kindArr[i] = kind
   }
 
-  return { radius: radiusArr, angle: angleArr, height: heightArr, seed: seedArr, count }
+  return {
+    radius: radiusArr,
+    angle: angleArr,
+    height: heightArr,
+    seed: seedArr,
+    kind: kindArr,
+    count,
+  }
+}
+
+/**
+ * A spherical shell of distant stars around the camera.
+ *
+ * Fibonacci distribution rather than random spherical coordinates — the latter
+ * clumps badly at the poles, and on a starfield that clumping is very visible.
+ */
+export function buildStarShell(count: number, radius: number, spread = 0.35) {
+  const positions = new Float32Array(count * 3)
+  const seed = new Float32Array(count)
+  const golden = Math.PI * (3 - Math.sqrt(5))
+
+  for (let i = 0; i < count; i++) {
+    const y = 1 - (i / Math.max(1, count - 1)) * 2
+    const r = Math.sqrt(Math.max(0, 1 - y * y))
+    const theta = golden * i
+    const jitter = 1 + (Math.random() - 0.5) * spread
+
+    positions[i * 3 + 0] = Math.cos(theta) * r * radius * jitter
+    positions[i * 3 + 1] = y * radius * jitter
+    positions[i * 3 + 2] = Math.sin(theta) * r * radius * jitter
+    seed[i] = Math.random()
+  }
+
+  return { positions, seed, count }
 }

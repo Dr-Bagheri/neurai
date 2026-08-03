@@ -76,7 +76,7 @@ export default function HomePage() {
       >
         <dl className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
           {STATS.map((stat) => (
-            <GlassCard key={stat.label} etch={false}>
+            <GlassCard key={stat.label} glow>
               <dd className="font-display text-4xl font-light text-text-100">
                 {faNumber(stat.value)}
                 <span className="text-2xl text-text-300">{stat.suffix}</span>

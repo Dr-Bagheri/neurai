@@ -30,7 +30,7 @@ export function PostCard({ post, priority = false }: { post: PostCardData; prior
   const category = categoryTitle(post.category)
 
   return (
-    <GlassCard interactive etch={!cover} className="group p-0">
+    <GlassCard interactive className="group p-0">
       <Link href={`/blog/${post.slug}`} className="flex h-full flex-col">
         {cover ? (
           <div className="relative aspect-[16/10] overflow-hidden rounded-t-2xl">

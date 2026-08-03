@@ -280,95 +280,117 @@ the consumption side does not.
 
 ---
 
-## 6. The cosmos: one scene, three formations
+## 6. The cosmos: flying into the galaxy
 
 The background is a single WebGL2 scene mounted **once** in the root layout,
 outside the page slot. Navigation retargets the camera instead of rebuilding the
 context, which is what makes moving through the site read as one continuous shot
 rather than a sequence of page loads.
 
-Five layers, drawn back to front: nebula → galaxy → star shells → girih ring.
+Three layers, drawn back to front: nebula → galaxy → star shells.
 
 ```mermaid
 flowchart LR
     subgraph build["Build once, on boot"]
-        girih["buildGirihTorus()<br/>ten-pointed shamseh lattice<br/>wrapped on a torus"]
-        forms["buildFormations()<br/>column + terrain targets<br/>from the same u,v,seed"]
-        gal["buildGalaxy()<br/>polar coords: radius, angle, height<br/>4 logarithmic arms + bulge"]
-        girih --> forms
+        gal["buildGalaxy()<br/>polar: radius, angle, height, kind<br/>bulge · 2 spiral arms · halo"]
+        stars["buildStarShell()<br/>Fibonacci sphere ×3 depths"]
     end
-
-    gal --> galshader["Galaxy vertex shader<br/>angle += time · spin / (radius + k)<br/>differential rotation"]
 
     subgraph gpu["Vertex shader · every frame"]
-        blend["pos = ring·w0 + column·w1 + terrain·w2<br/>weights always sum to 1"]
-        turb["3-octave fbm turbulence<br/>displaced along the tube normal"]
-        blend --> turb
+        rot["angle += time · spin / (radius·k + c)<br/>differential rotation"]
+        rebuild["pos = (cos·r, height, sin·r)<br/>Cartesian rebuilt from polar"]
+        ripple["click ripples<br/>expanding shell displacement"]
+        rot --> rebuild --> ripple
     end
 
-    forms --> blend
-    scroll["--journey<br/>0 → 1"] --> weights["formationWeights()"]
-    weights --> blend
+    gal --> rot
+    scroll["--journey<br/>0 → 1"] --> flight["Camera flight<br/>y 30→1.2 · z 36→3<br/>smoothstep eased"]
     scroll --> css["CSS bloom layers<br/>same variable"]
 
-    turb --> frag["Fragment shader<br/>hue = dot(pos, colourAxis)<br/>axis rotates with formation"]
+    ripple --> frag["Fragment shader<br/>warm ramp: core → gold → copper → ember<br/>falloff steepens outward"]
+    pointer["pointer NDC"] --> prox["core proximity<br/>project origin → NDC"]
+    prox --> frag
+    prox --> hit{"within 0.14 NDC?"}
+    hit -->|click| open["dispatch neurai:open-assistant"]
 ```
 
-Formation handover across the scroll, from `FORMATION_SCHEDULE` in
-`src/components/cosmos/engine.ts`:
+Scroll is a flight path, not a zoom:
 
 ```mermaid
 stateDiagram-v2
     direction LR
 
-    [*] --> Ring
+    [*] --> Above
 
-    Ring: Ring · حلقه
-    Ring: scroll 0 – 26%
-    Ring: girih torus, spinning, full turbulence
+    Above: Above the disc
+    Above: journey 0 · camera y30 z36
+    Above: the spiral is legible as a shape
 
-    RingToColumn: cross-fade
-    RingToColumn: 26 – 42%
-    RingToColumn: smoothstep, rotation winds down
+    Descent: Descending through the arms
+    Descent: journey 0 – 1, smoothstep eased
+    Descent: ambient light rises as the core nears
 
-    Column: Column · ستون
-    Column: 42 – 60%
-    Column: vertical plume, turbulence ×0.55
+    Inside: Inside the core
+    Inside: journey 1 · camera y1.2 z3
+    Inside: arms sweep past the camera
 
-    ColumnToTerrain: cross-fade
-    ColumnToTerrain: 60 – 78%
-    ColumnToTerrain: camera lifts and pitches down
-
-    Terrain: Terrain · چشم‌انداز
-    Terrain: 78 – 100%
-    Terrain: wave landscape, no rotation, turbulence ×0.3
-
-    Ring --> RingToColumn
-    RingToColumn --> Column
-    Column --> ColumnToTerrain
-    ColumnToTerrain --> Terrain
-    Terrain --> [*]
+    Above --> Descent
+    Descent --> Inside
+    Inside --> [*]
 ```
 
-| Scroll | ring | column | terrain | Colour axis |
-|---|---|---|---|---|
-| 0 – 26% | 1.00 | 0.00 | 0.00 | diagonal `(0.42, 1)` |
-| 42 – 60% | 0.00 | 1.00 | 0.00 | vertical `(0.15, 1)` |
-| 78 – 100% | 0.00 | 0.00 | 1.00 | horizontal `(1, 0.12)` |
+**Why polar storage.** Angular velocity falls with radius, so arms trail and
+wind — real disc behaviour. Baking Cartesian positions would force the disc to
+rotate rigidly, which reads as a spinning picture of a galaxy rather than a
+galaxy.
 
-The plateaus matter as much as the transitions. A formation needs a stretch
-where it is simply itself and the reader can look at it — without them the page
-reads as one continuous unresolved morph.
+**Why the approach is eased.** A linear dolly reads as a zoom. `smoothstep`
+decelerates the approach near the core, which is what makes it feel like flight.
 
-**Why one particle buffer instead of three systems.** Each point's destination
-in every formation derives from the same `(ringAngle, tubeAngle, seed)` triple,
-so neighbours stay neighbours through the morph — the ring visibly unravels into
-the column. Cross-fading three independent systems would read as one thing
-vanishing while another appears.
+**Why point size is clamped.** As the camera passes through the core, `-mv.z`
+approaches zero; unclamped, `1/depth` sizing explodes a particle into a
+screen-filling white square.
 
-**Why the weights must sum to 1.** They are interpolation coefficients. If they
-are allowed to under-sum, every point drifts toward the origin mid-transition
-and the whole field collapses inward.
+---
+
+## 6b. The core is the assistant
+
+There is no chat button anywhere on the site. The bright centre of the galaxy
+*is* the assistant: pointing at it brightens it, clicking it opens the
+conversation in the middle of the page.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as بازدیدکننده
+    participant C as CosmosCanvas
+    participant E as CosmosEngine
+    participant W as ChatWidget
+
+    U->>C: pointermove
+    C->>E: setPointer(ndc)
+    E->>E: project core origin → NDC<br/>distance to pointer
+    E-->>C: isPointerOnCore()
+    C->>C: cursor: pointer<br/>data-core-hover
+    Note over E: uCoreGlow ramps 0→1<br/>inner disc heats, core swells
+
+    U->>C: pointerdown on core
+    C->>W: window event neurai:open-assistant
+    W-->>U: centred dialog, aria-modal
+```
+
+**Why a window event rather than shared state.** The canvas and the chat panel
+are siblings under a server-rendered layout with no common client provider
+between them. An event keeps them decoupled without threading a context
+provider through the server tree.
+
+**Why the panel is centred.** It opens *out of the core*. Anchoring it to a
+corner would break the causal link between what you clicked and what appeared.
+
+**Accessibility.** A light source with no button is invisible to a screen reader
+and unreachable by keyboard. A visually-hidden button in `CosmosCanvas` exposes
+the same action and becomes visible on focus — two routes to one behaviour, not
+a fallback.
 
 ---
 
@@ -416,7 +438,7 @@ flowchart TB
 
     root --> compose["docker-compose.yml<br/>Dockerfile · Caddyfile"]
     root --> services["services/embeddings/<br/>Hakim FastAPI wrapper"]
-    root --> scripts["scripts/<br/>verify-girih · preview-cosmos<br/>preview-formations · setup-db"]
+    root --> scripts["scripts/<br/>preview-cosmos · setup-db"]
     root --> docs["docs/<br/>ARCHITECTURE · DIAGRAMS"]
     root --> src["src/"]
 
@@ -426,7 +448,7 @@ flowchart TB
 
     src --> coll["collections/ · globals/<br/>content model + access rules"]
     src --> comp["components/"]
-    comp --> cos["cosmos/<br/>engine · girih · tier · canvas"]
+    comp --> cos["cosmos/<br/>engine · galaxy · tier · canvas"]
     comp --> ui["ui/ · layout/ · sections/<br/>blog/ · chat/ · personalization/"]
 
     src --> lib["lib/<br/>ai/ · content/ · db · rate-limit · utils"]

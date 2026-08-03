@@ -1,9 +1,10 @@
 'use client'
 
-import { ArrowUp, Loader2, MessageCircle, X } from 'lucide-react'
+import { ArrowUp, Loader2, X } from 'lucide-react'
 import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
 
+import { OPEN_ASSISTANT_EVENT } from '@/components/cosmos/CosmosCanvas'
 import { cn } from '@/lib/utils'
 
 type Message = { role: 'user' | 'assistant'; content: string }
@@ -36,6 +37,15 @@ export function ChatWidget({ greeting, suggestions }: { greeting: string; sugges
   useEffect(() => {
     if (open) inputRef.current?.focus()
   }, [open])
+
+  // The galactic core is the only way in. There is no floating button: the
+  // assistant *is* the light at the centre of the galaxy, and putting a chat
+  // bubble in the corner as well would undercut that entirely.
+  useEffect(() => {
+    const onOpen = () => setOpen(true)
+    window.addEventListener(OPEN_ASSISTANT_EVENT, onOpen)
+    return () => window.removeEventListener(OPEN_ASSISTANT_EVENT, onOpen)
+  }, [])
 
   // Escape closes the panel — expected for any dialog-like surface.
   useEffect(() => {
@@ -119,30 +129,43 @@ export function ChatWidget({ greeting, suggestions }: { greeting: string; sugges
     }
   }
 
+  if (!open) return null
+
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        aria-expanded={open}
-        aria-controls="chat-panel"
-        aria-label={open ? 'بستن دستیار' : 'گفت‌وگو با دستیار'}
-        className="fixed bottom-6 start-6 z-50 grid size-14 place-items-center rounded-full border border-hairline-strong bg-glass-2 text-accent backdrop-blur-xl transition-all duration-300 hover:border-accent/60 hover:bg-accent/10"
-      >
-        {open ? <X className="size-5" /> : <MessageCircle className="size-5" />}
-      </button>
+      {/* Scrim. Deliberately light: the galaxy is the reason the visitor is
+          here, so it should stay visible behind the conversation rather than
+          being blacked out. */}
+      <div
+        className="fixed inset-0 z-40 bg-void-1000/45 backdrop-blur-[2px]"
+        onClick={() => setOpen(false)}
+        aria-hidden="true"
+      />
 
-      {open ? (
-        <div
-          id="chat-panel"
-          role="dialog"
-          aria-label="دستیار هوشمند"
-          className="fixed bottom-24 start-6 z-50 flex h-[min(34rem,calc(100dvh-8rem))] w-[min(24rem,calc(100vw-3rem))] flex-col overflow-hidden rounded-2xl border border-hairline bg-void-950/92 backdrop-blur-2xl"
-        >
-          <header className="border-b border-hairline px-5 py-4">
+      <div
+        id="chat-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-label="دستیار هوشمند"
+        // Centred, because it opens *out of the core* — anchoring it to a
+        // corner would break the causal link between what you clicked and what
+        // appeared.
+        className="fixed start-1/2 top-1/2 z-50 flex h-[min(32rem,calc(100dvh-6rem))] w-[min(30rem,calc(100vw-2.5rem))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-3xl border border-hairline-strong bg-void-950/92 shadow-[0_0_120px_-20px_rgba(255,180,84,0.35)] backdrop-blur-2xl rtl:translate-x-1/2"
+      >
+        <header className="flex items-start justify-between gap-4 border-b border-hairline px-6 py-4">
+          <div>
             <p className="text-sm text-text-100">دستیار NEURAI</p>
             <p className="mt-0.5 text-xs text-text-400">پاسخ‌ها بر پایهٔ محتوای همین سایت است</p>
-          </header>
+          </div>
+          <button
+            type="button"
+            onClick={() => setOpen(false)}
+            aria-label="بستن"
+            className="grid size-8 shrink-0 place-items-center rounded-full border border-hairline text-text-300 transition-colors hover:border-accent/50 hover:text-accent"
+          >
+            <X className="size-4" />
+          </button>
+        </header>
 
           <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
             {messages.length === 0 ? (
@@ -236,10 +259,9 @@ export function ChatWidget({ greeting, suggestions }: { greeting: string; sugges
                   <ArrowUp className="size-4" />
                 )}
               </button>
-            </div>
-          </form>
-        </div>
-      ) : null}
+          </div>
+        </form>
+      </div>
     </>
   )
 }

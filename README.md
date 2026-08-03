@@ -10,9 +10,9 @@
 
 ---
 
-> **⚠️ نام تجاری موقت است.** «NEURAI / NEURAI» یک نام جایگزین است که با فضای طراحی
-> هم‌خوانی دارد (NEURAI = cosmos). برای تغییر، فقط [`src/config/brand.ts`](src/config/brand.ts)
-> را ویرایش کنید؛ هیچ جای دیگری نام شرکت را hardcode نکرده است.
+> **هویت برند** در [`src/config/brand.ts`](src/config/brand.ts) متمرکز است — نام، شعار و
+> اطلاعات تماس فقط از همین یک فایل خوانده می‌شود و هیچ جای دیگری hardcode نشده است.
+> اطلاعات تماس هنوز placeholder است و باید پیش از انتشار پر شود.
 
 ## Overview
 
@@ -34,39 +34,58 @@ outbound internet dependency.
 
 ## What makes it different
 
-### NEURAI — a persistent, interactive cosmos
+### A persistent, interactive cosmos
 
 The background is a single WebGL2 scene mounted **once** in the root layout,
 outside the page slot. Navigating never rebuilds the context: routes retarget
 the camera, so moving through the site is one continuous shot rather than a
 sequence of page loads.
 
-It is interactive — pointer parallax, a cursor gravity well that parts the
-particles, click ripples that propagate outward — and it responds to scroll via
-a single `--journey` variable that the CSS blooms and the GPU scene both read,
-so they can never drift apart.
+Scroll is a **flight path**, not a zoom. The camera starts high above the disc
+where the spiral is legible as a shape, descends through the arms, and ends
+inside the core — driven by a single `--journey` variable that the CSS blooms
+and the GPU scene both read, so they can never drift apart.
 
-### «حلقهٔ گره» — the Girih Torus
+Particles are stored in polar form and the shader rebuilds their positions each
+frame. That is what allows **differential rotation**: angular velocity falls
+with radius, so the arms trail and wind the way a real disc does. Baking
+Cartesian positions would force rigid rotation, which reads as a spinning
+picture of a galaxy rather than a galaxy.
 
-The ring at the centre is not a generic particle torus. Its ~40,000 points trace
-a periodic Persian **شمسه** (ten-pointed star rosette) lattice wrapped on a
-torus, then displaced by three-octave turbulence into a living plasma ring. From
-a distance it reads as a glowing ring; up close it resolves into Persian
-ornament.
+### The core is the assistant
 
-![The Girih Torus](public/cosmos-preview.png)
+There is no chat button anywhere on the site. The bright centre of the galaxy
+**is** the assistant — point at it and it brightens, click it and the
+conversation opens in the middle of the page.
+
+![The galaxy](public/cosmos-preview.png)
+
+A visually-hidden button exposes the same action to keyboard and screen-reader
+users, becoming visible on focus. A light source with no control is beautiful
+and completely unreachable otherwise.
 
 That image is generated from the real geometry by
 [`scripts/preview-cosmos.ts`](scripts/preview-cosmos.ts), which also emits the
 static fallback served to visitors without WebGL2 — so the fallback can never
 drift from the live scene.
 
-### Design system — «از آتش تا فیروزه» (Ember → Firouzeh)
+### Design system — warm light on deep space
 
-Colour is budgeted **60 : 30 : 10** — 60% unlit void, 30% desaturated structure,
-10% signal. Ember and firouzeh are the two poles of Persian miniature and
-tilework, which is why the palette is culturally rooted rather than borrowed.
-Full rationale in [`docs/DESIGN.md`](docs/DESIGN.md).
+Colour is budgeted **60 : 30 : 10** — 60% unlit void, 30% structure, 10% signal.
+
+Everything is warm. There is no cool pole anywhere in the palette, so the warmth
+reads as a decision rather than a default; a single blue element would look like
+a bug. The void tones carry a red-brown cast rather than being neutral black,
+because neutral black under warm light reads as a printing error.
+
+| Share | Role | Tokens |
+|---|---|---|
+| 60% | Void | `#050303` · `#0a0706` · `#120d09` |
+| 30% | Structure | cream `#f4ead9` · muted `#a89179` · warm-tinted glass |
+| 10% | Signal | core `#fff4de` · gold `#ffb454` · copper `#e07b3c` · ember `#9c4a18` |
+
+Type: **Estedad** display · **Vazirmatn** body · **Space Grotesk** Latin and
+wordmark. All self-hosted from `@fontsource-variable`, no CDN.
 
 ### RTL is structural, not a patch
 
@@ -131,8 +150,7 @@ pnpm db:setup
 | `pnpm typecheck` | `tsc --noEmit` |
 | `pnpm lint` | ESLint, including the RTL logical-property rule |
 | `pnpm db:setup` | Apply extensions + app tables to an existing database |
-| `pnpm verify:girih` | Numerically verify the torus geometry |
-| `pnpm cosmos:preview` | Re-render the hero preview and static fallback |
+| `pnpm cosmos:preview` | Re-render the galaxy preview and static fallback |
 | `pnpm migrate:create` | Generate a Payload migration |
 
 ## Architecture
@@ -144,10 +162,10 @@ Caddy (TLS) ──▶ Next.js 16 ──┬──▶ Postgres 17 + pgvector
                              └──▶ MinIO       (S3 :9000)
 ```
 
-**[`docs/DIAGRAMS.md`](docs/DIAGRAMS.md)** — nine Mermaid diagrams covering the
+**[`docs/DIAGRAMS.md`](docs/DIAGRAMS.md)** — ten Mermaid diagrams covering the
 deployment topology, data model, publish→index pipeline, chat request sequence,
-where privacy consent is enforced, the cosmos formation state machine, and the
-degradation ladder. They render inline on GitHub.
+where privacy consent is enforced, the cosmos flight path, the core→assistant
+interaction, and the degradation ladder. They render inline on GitHub.
 
 Full written detail, including the data model and the RAG pipeline, in
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
@@ -174,5 +192,5 @@ is honoured. Members can delete individual memories or their whole account.
 
 ## Licence
 
-Source is MIT. Note that fonts (Vazirmatn, Onest — SIL OFL) and models (Qwen3
-Apache-2.0, Hakim) carry their own licences.
+Source is MIT. Note that fonts (Vazirmatn, Estedad, Space Grotesk — SIL OFL) and
+models (Qwen3 Apache-2.0, Hakim) carry their own licences.

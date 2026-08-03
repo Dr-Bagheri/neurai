@@ -2,55 +2,42 @@
  * The cosmos engine.
  *
  * One WebGL2 scene, mounted once for the lifetime of the session and never torn
- * down on navigation. Routes change the *camera and the scene state*, not the
- * canvas — which is what makes moving through the site feel like one continuous
- * shot rather than a series of page loads.
+ * down on navigation. Routes move the camera; they do not rebuild the context.
+ * That is what makes travelling through the site read as one continuous shot.
+ *
+ * The galaxy is the whole background. Scrolling flies the camera *into* it —
+ * from high above the disc, down through the arms, and finally inside the
+ * core. The core is not decoration: it is the assistant. Pointing at it makes
+ * it brighten, and clicking it opens the chat.
  *
  * Design constraints, in priority order:
- *   1. Never block first paint. The engine is dynamically imported and starts
- *      after the page is interactive.
+ *   1. Never block first paint. Dynamically imported, started after interactive.
  *   2. All per-particle motion lives in the vertex shader. The CPU updates a
- *      handful of uniforms per frame and nothing else — no per-point JS loops.
- *   3. Glow comes from additive blending on soft point sprites, not a
- *      post-processing pass. A bloom pass would roughly double the frame cost
- *      for a difference few visitors would notice on a dark page.
+ *      handful of uniforms per frame and nothing else.
+ *   3. Glow is additive point sprites, not a post-processing pass. A bloom pass
+ *      would roughly double frame cost for a difference few would notice.
  */
 
 import * as THREE from 'three'
 
-import { buildGalaxy, DEFAULT_GALAXY } from './galaxy'
-import { buildFormations, buildGirihTorus, buildStarShell } from './girih'
+import { buildGalaxy, buildStarShell, DEFAULT_GALAXY } from './galaxy'
 import type { CosmosBudget } from './tier'
 
 export type SceneName = 'home' | 'inner' | 'reading'
 
 const MAX_RIPPLES = 4
 
-/**
- * Ring tilt, in radians from face-on.
- *
- * Deliberately small. The colour ramp keys off model-space Y, so this angle is
- * also what keeps warm-at-top / cool-at-bottom aligned with the screen. Tilting
- * far enough to see the torus as a disc rotates the gradient into the depth
- * axis, where it is invisible.
- */
-const RING_TILT = 0.16
-
-/* ── Palette, mirroring the CSS design tokens ──────────────────────────────
-   Kept in sync by hand with src/styles/globals.css. These are the only
-   saturated colours the engine is allowed to emit — the 10% signal budget. */
-// The ring poles run hotter and more saturated than the flat UI tokens.
-// Additive blending against pure black desaturates everything it touches, so
-// emitting the UI values directly yields the muddy brown/navy you get from
-// blending — these are pre-compensated to land on the token hues on screen.
-const EMBER = new THREE.Color('#ff7a3d')
-const EMBER_HOT = new THREE.Color('#ffd9a8')
-const LAPIS = new THREE.Color('#2f5bd0')
-const CYAN = new THREE.Color('#8fe3ff')
-const STAR_WARM = new THREE.Color('#f0dcc4')
-const STAR_COOL = new THREE.Color('#bcd6e8')
-/** Galactic core — hot white with a gold cast, the brightest thing on the page. */
-const GALAXY_CORE = new THREE.Color('#fff2d6')
+/* ── Palette ───────────────────────────────────────────────────────────────
+   Warm only. There is no cool pole anywhere in this scene — the discipline is
+   the point, and a single blue particle would read as a bug. Values run hotter
+   than the CSS tokens because additive blending against near-black desaturates
+   everything it touches; these are pre-compensated to land on the token hues. */
+const CORE_HOT = new THREE.Color('#fff6e4')
+const GOLD = new THREE.Color('#ffb454')
+const COPPER = new THREE.Color('#e07b3c')
+const EMBER_DEEP = new THREE.Color('#8f3f14')
+const STAR_WARM = new THREE.Color('#ffe6c2')
+const STAR_PALE = new THREE.Color('#f6e3cb')
 
 /** Soft radial sprite, generated at runtime so there is no image to download. */
 function createSpriteTexture(): THREE.Texture {
@@ -70,13 +57,10 @@ function createSpriteTexture(): THREE.Texture {
 
   const texture = new THREE.CanvasTexture(canvas)
   texture.colorSpace = THREE.SRGBColorSpace
-  texture.needsUpdate = true
   return texture
 }
 
 const NOISE_GLSL = /* glsl */ `
-  // Cheap 3D value noise. Good enough for organic drift; a gradient-noise
-  // implementation would cost more than the visual difference is worth here.
   float hash(vec3 p) {
     p = fract(p * 0.3183099 + vec3(0.71, 0.113, 0.419));
     p *= 17.0;
@@ -95,167 +79,117 @@ const NOISE_GLSL = /* glsl */ `
   }
 `
 
-const GIRIH_VERTEX = /* glsl */ `
+const GALAXY_VERTEX = /* glsl */ `
+  attribute float aRadius;
+  attribute float aAngle;
+  attribute float aHeight;
   attribute float aSeed;
-  attribute float aRingAngle;
-  attribute float aTubeAngle;
-  attribute vec3  aColumn;
-  attribute vec3  aTerrain;
+  attribute float aKind;      // 0 bulge · 1 arm · 2 halo
 
   uniform float uTime;
-  uniform float uTurbulence;
-  // Formation weights, summing to 1: ring / column / terrain.
-  uniform vec3  uFormation;
-  uniform float uJourney;
-  uniform float uDisperse;
   uniform float uPixelRatio;
   uniform float uSize;
-  uniform vec3  uPointer;      // pointer, projected onto the ring plane
-  uniform float uPointerForce;
-  uniform vec4  uRipples[${MAX_RIPPLES}];  // xyz = origin, w = age in seconds (<0 = inactive)
+  uniform float uSpin;
+  uniform float uOuterRadius;
+  uniform float uCoreGlow;    // 0..1, pointer proximity to the core
+  uniform float uJourney;     // 0..1, how deep into the galaxy we have flown
+  uniform vec4  uRipples[${MAX_RIPPLES}];
 
   varying float vSeed;
-  varying float vHeight;
+  varying float vRadial;
+  varying float vKind;
   varying float vBoost;
-  varying float vWisp;
-  varying vec2  vRingXY;
 
   ${NOISE_GLSL}
 
-  // Three octaves is the sweet spot: enough to read as turbulence rather than a
-  // sine wave, cheap enough to run per-vertex on 40k points every frame.
-  float fbm3(vec3 p) {
-    float total = 0.0;
-    float amplitude = 0.5;
-    for (int i = 0; i < 3; i++) {
-      total += noise(p) * amplitude;
-      p *= 2.07;
-      amplitude *= 0.5;
-    }
-    return total;
-  }
-
   void main() {
-    // Blend the three formations. Every point has a destination in each, all
-    // derived from the same (ringAngle, tubeAngle, seed) triple, so neighbours
-    // stay neighbours and the morph reads as the ring *becoming* the column
-    // rather than one shape fading into another.
-    vec3 pos = position * uFormation.x + aColumn * uFormation.y + aTerrain * uFormation.z;
+    // Differential rotation: angular velocity falls with radius, so arms trail
+    // and wind. A rigid rotation would read as a spinning picture.
+    float angle = aAngle + uTime * uSpin / (aRadius * 0.14 + 0.7);
 
-    // Turbulence follows the ring while the ring is what we are looking at, and
-    // relaxes as the formation flattens — a landscape shouldn't boil.
-    float turbAmount = uTurbulence * (uFormation.x + uFormation.y * 0.55 + uFormation.z * 0.3);
+    vec3 pos = vec3(cos(angle) * aRadius, aHeight, sin(angle) * aRadius);
 
-    // Direction from the tube's centreline outward — displacing along this
-    // thickens and feathers the ring instead of just jittering points in place.
-    vec3 axisPoint = normalize(vec3(pos.xy, 0.0) + 0.0001) * 3.5;
-    vec3 outward = normalize(pos - axisPoint + 0.0001);
+    // Gentle turbulence so the dust drifts rather than sitting on rails.
+    float n = noise(pos * 0.09 + vec3(0.0, uTime * 0.02, 0.0));
+    pos += vec3(n - 0.5, (n - 0.5) * 0.4, n - 0.5) * 0.9;
 
-    // Points already near the tube's outer edge get displaced hardest, which is
-    // what produces the wispy flame-like tendrils rather than a uniformly
-    // fuzzy doughnut.
-    float edge = abs(sin(aTubeAngle * 3.14159));
-    vWisp = edge;
-
-    // Turbulence advected slowly along the ring, so the plasma appears to flow
-    // around the circumference rather than boil in place.
-    vec3 field = vec3(pos.xy * 0.75, aRingAngle * 6.0 - uTime * 0.10);
-    float turbulence = fbm3(field) - 0.5;
-    float swirl = fbm3(field + vec3(11.3, 7.1, 3.7)) - 0.5;
-
-    pos += outward * turbulence * turbAmount * (0.55 + edge * 1.45);
-    // A tangential component stops the displacement reading as purely radial.
-    pos += vec3(-pos.y, pos.x, 0.0) * 0.08 * swirl * turbAmount;
-    pos.z += swirl * turbAmount * 0.5;
-
-    // Dispersion: on inner routes the ring loosens into a drifting field, so
-    // navigating reads as travelling outward rather than as a scene swap.
-    pos += normalize(pos + 0.0001) * uDisperse * (0.6 + aSeed * 2.4);
-
-    // Cursor gravity well. Points near the pointer are pushed outward along
-    // the surface, so dragging through the ring parts it like dust.
-    vec3 toPointer = pos - uPointer;
-    float dist = length(toPointer);
-    float influence = uPointerForce * exp(-dist * dist * 0.55);
-    pos += normalize(toPointer + 0.0001) * influence * 0.85;
-
-    // Click ripples: an expanding shell that lifts points as it passes.
+    // Click ripples: an expanding shell that lifts dust as it passes.
     float boost = 0.0;
     for (int i = 0; i < ${MAX_RIPPLES}; i++) {
       vec4 ripple = uRipples[i];
       if (ripple.w < 0.0) continue;
-      float radius = ripple.w * 4.2;
-      float d = abs(length(pos - ripple.xyz) - radius);
-      float shell = smoothstep(0.85, 0.0, d) * smoothstep(2.6, 0.4, ripple.w);
-      pos += normalize(pos - ripple.xyz + 0.0001) * shell * 0.5;
+      float shellRadius = ripple.w * 16.0;
+      float d = abs(length(pos - ripple.xyz) - shellRadius);
+      float shell = smoothstep(3.2, 0.0, d) * smoothstep(2.8, 0.4, ripple.w);
+      pos += normalize(pos - ripple.xyz + 0.0001) * shell * 1.4;
       boost += shell;
     }
 
     vSeed = aSeed;
-    vHeight = pos.y;
-    vRingXY = pos.xy;
-    vBoost = clamp(boost, 0.0, 1.5) + influence * 1.4;
+    vKind = aKind;
+    vRadial = clamp(aRadius / uOuterRadius, 0.0, 1.0);
+    vBoost = clamp(boost, 0.0, 1.5);
 
     vec4 mv = modelViewMatrix * vec4(pos, 1.0);
     gl_Position = projectionMatrix * mv;
 
-    float twinkle = 0.72 + 0.28 * sin(uTime * 1.1 + aSeed * 40.0 + aRingAngle * 12.0);
-    gl_PointSize = uSize * uPixelRatio * twinkle * (1.0 + vBoost * 0.9) * (14.0 / -mv.z);
+    // Core particles are larger and swell further when the pointer nears them.
+    float coreness = 1.0 - smoothstep(0.0, 0.22, vRadial);
+    float coreBoost = 1.0 + coreness * (2.4 + uCoreGlow * 3.0);
+    float twinkle = 0.72 + 0.28 * sin(uTime * 0.8 + aSeed * 55.0);
+
+    // -mv.z can approach zero as the camera flies through the core; clamping
+    // stops point size exploding to a screen-filling white square.
+    float depth = max(-mv.z, 0.9);
+    gl_PointSize = uSize * uPixelRatio * coreBoost * twinkle * (1.0 + vBoost) * (30.0 / depth);
   }
 `
 
-const GIRIH_FRAGMENT = /* glsl */ `
+const GALAXY_FRAGMENT = /* glsl */ `
   precision highp float;
 
+  uniform vec3  uCore;
+  uniform vec3  uGold;
+  uniform vec3  uCopper;
   uniform vec3  uEmber;
-  uniform vec3  uEmberHot;
-  uniform vec3  uLapis;
-  uniform vec3  uCyan;
-  uniform float uJourney;
   uniform float uOpacity;
-  // Axis and extent the colour ramp is measured along. Both change with the
-  // formation: the ring reads diagonally, the terrain left-to-right.
-  uniform vec2  uColorAxis;
-  uniform float uColorScale;
+  uniform float uCoreGlow;
+  uniform float uJourney;
 
   varying float vSeed;
-  varying float vHeight;
+  varying float vRadial;
+  varying float vKind;
   varying float vBoost;
-  varying float vWisp;
-  varying vec2  vRingXY;
 
   void main() {
-    // Soft round sprite. Discarding early is cheaper than blending a full quad.
     vec2 uv = gl_PointCoord - 0.5;
     float d = length(uv);
     if (d > 0.5) discard;
-    float alpha = smoothstep(0.5, 0.02, d);
+    float alpha = smoothstep(0.5, 0.04, d);
 
-    // Hue is a function of where the point sits in space, not of time, so the
-    // plasma flows *through* a gradient that stays anchored. The axis rotates
-    // with the formation: diagonal for the ring (ember upper-right, firouzeh
-    // lower-left, giving the reference its tilt) and horizontal for the
-    // terrain, where the reference runs firouzeh-left to ember-right.
-    float t = clamp(dot(vRingXY, normalize(uColorAxis)) / uColorScale * 0.5 + 0.5, 0.0, 1.0);
+    // One warm ramp from core to rim. Hot cream at the centre, gold through the
+    // inner arms, copper mid-disc, deep ember at the edge. Nothing cools.
+    vec3 color = mix(uCore, uGold, smoothstep(0.0, 0.26, vRadial));
+    color = mix(color, uCopper, smoothstep(0.26, 0.62, vRadial));
+    color = mix(color, uEmber, smoothstep(0.62, 1.0, vRadial));
 
-    vec3 warm = mix(uEmber, uEmberHot, smoothstep(0.62, 1.0, t));
-    vec3 cool = mix(uLapis, uCyan, smoothstep(0.42, 0.0, t));
-    // A wide crossover so the flanks land on the magenta the two poles make
-    // together, rather than cutting hard from warm to cool at the equator.
-    vec3 color = mix(cool, warm, smoothstep(0.06, 0.94, t));
+    // Pointing at the core heats the whole inner disc, not just the exact
+    // centre — a light source that brightens without spilling looks like a
+    // sprite swap rather than like light.
+    float coreness = 1.0 - smoothstep(0.0, 0.34, vRadial);
+    color = mix(color, uCore, coreness * uCoreGlow * 0.85);
 
-    // Scrolling cools the whole ring, continuing the ember → firouzeh journey
-    // that the CSS blooms run behind the content.
-    color = mix(color, uCyan, uJourney * 0.35);
+    color = mix(color, uCore, clamp(vBoost * 0.5, 0.0, 0.6));
 
-    // Interaction reads as heat.
-    color = mix(color, uEmberHot, clamp(vBoost * 0.5, 0.0, 0.7));
+    // Brightness falls steeply outward: that is what makes the core read as a
+    // light source rather than as the middle of an evenly lit disc.
+    float falloff = mix(1.0, 0.09, smoothstep(0.0, 0.72, vRadial));
+    // The halo is faint by nature.
+    if (vKind > 1.5) falloff *= 0.35;
+    // Flying inward raises the ambient level, as though the light is closing in.
+    falloff *= 1.0 + uJourney * 0.5 + coreness * uCoreGlow * 1.2;
 
-    // Wisps at the tube's outer edge are dimmer than its core, so the ring
-    // reads as a dense spine fading into tendrils rather than a flat band.
-    float density = mix(1.0, 0.42, vWisp);
-
-    gl_FragColor = vec4(color, alpha * uOpacity * density * (0.34 + vSeed * 0.30));
+    gl_FragColor = vec4(color, alpha * uOpacity * falloff * (0.45 + vSeed * 0.55));
   }
 `
 
@@ -271,7 +205,6 @@ const STAR_VERTEX = /* glsl */ `
 
   void main() {
     vec3 pos = position;
-    // Barely-there drift keeps the field from reading as a printed backdrop.
     pos.x += sin(uTime * 0.05 + aSeed * 30.0) * uDrift;
     pos.y += cos(uTime * 0.04 + aSeed * 24.0) * uDrift;
 
@@ -280,7 +213,7 @@ const STAR_VERTEX = /* glsl */ `
     gl_Position = projectionMatrix * mv;
 
     float twinkle = 0.55 + 0.45 * sin(uTime * (0.5 + aSeed) + aSeed * 60.0);
-    gl_PointSize = uSize * uPixelRatio * twinkle * (30.0 / -mv.z);
+    gl_PointSize = uSize * uPixelRatio * twinkle * (30.0 / max(-mv.z, 1.0));
   }
 `
 
@@ -288,9 +221,8 @@ const STAR_FRAGMENT = /* glsl */ `
   precision highp float;
 
   uniform vec3  uWarm;
-  uniform vec3  uCool;
+  uniform vec3  uPale;
   uniform float uOpacity;
-  uniform float uJourney;
 
   varying float vSeed;
 
@@ -299,82 +231,8 @@ const STAR_FRAGMENT = /* glsl */ `
     float d = length(uv);
     if (d > 0.5) discard;
     float alpha = smoothstep(0.5, 0.05, d);
-
-    vec3 color = mix(uCool, uWarm, vSeed);
-    color = mix(color, uCool, uJourney * 0.4);
-
-    gl_FragColor = vec4(color, alpha * uOpacity * (0.35 + vSeed * 0.65));
-  }
-`
-
-const GALAXY_VERTEX = /* glsl */ `
-  attribute float aRadius;
-  attribute float aAngle;
-  attribute float aHeight;
-  attribute float aSeed;
-
-  uniform float uTime;
-  uniform float uPixelRatio;
-  uniform float uSize;
-  uniform float uSpin;
-  uniform float uOuterRadius;
-
-  varying float vSeed;
-  varying float vRadial;   // 0 at the core, 1 at the rim
-
-  void main() {
-    // Differential rotation: angular velocity falls with radius, so the arms
-    // trail and wind over time the way a real disc does. Rotating the whole
-    // mesh rigidly instead would read as a spinning picture of a galaxy.
-    float angle = aAngle + uTime * uSpin / (aRadius * 0.16 + 0.6);
-
-    vec3 pos = vec3(cos(angle) * aRadius, aHeight, sin(angle) * aRadius);
-
-    vRadial = clamp(aRadius / uOuterRadius, 0.0, 1.0);
-    vSeed = aSeed;
-
-    vec4 mv = modelViewMatrix * vec4(pos, 1.0);
-    gl_Position = projectionMatrix * mv;
-
-    // Core stars are larger and brighter; rim stars are dust.
-    float coreBoost = 1.0 + (1.0 - vRadial) * 2.2;
-    float twinkle = 0.75 + 0.25 * sin(uTime * 0.7 + aSeed * 50.0);
-    gl_PointSize = uSize * uPixelRatio * coreBoost * twinkle * (26.0 / -mv.z);
-  }
-`
-
-const GALAXY_FRAGMENT = /* glsl */ `
-  precision highp float;
-
-  uniform vec3  uCore;
-  uniform vec3  uEmber;
-  uniform vec3  uLapis;
-  uniform vec3  uCyan;
-  uniform float uOpacity;
-
-  varying float vSeed;
-  varying float vRadial;
-
-  void main() {
-    vec2 uv = gl_PointCoord - 0.5;
-    float d = length(uv);
-    if (d > 0.5) discard;
-    float alpha = smoothstep(0.5, 0.05, d);
-
-    // Radial colour temperature, as in a real spiral: hot white-gold core,
-    // ember mid-disc, cool blue outer arms where young stars sit.
-    vec3 color = mix(uCore, uEmber, smoothstep(0.0, 0.34, vRadial));
-    color = mix(color, uLapis, smoothstep(0.34, 0.78, vRadial));
-    color = mix(color, uCyan, smoothstep(0.78, 1.0, vRadial) * 0.55);
-
-    // Brightness falls steeply outward, which is what makes the core read as a
-    // light source rather than as the middle of an evenly lit disc. The rim
-    // goes almost to nothing on purpose: at this distance, faintly-lit outer
-    // particles resolve as isolated specks that look like dead pixels rather
-    // than like dust.
-    float falloff = mix(1.0, 0.05, smoothstep(0.0, 0.68, vRadial));
-
-    gl_FragColor = vec4(color, alpha * uOpacity * falloff * (0.5 + vSeed * 0.5));
+    vec3 color = mix(uPale, uWarm, vSeed);
+    gl_FragColor = vec4(color, alpha * uOpacity * (0.3 + vSeed * 0.7));
   }
 `
 
@@ -391,8 +249,8 @@ const NEBULA_FRAGMENT = /* glsl */ `
 
   uniform float uTime;
   uniform float uJourney;
-  uniform vec3  uEmber;
-  uniform vec3  uLapis;
+  uniform vec3  uCopper;
+  uniform vec3  uGold;
   uniform float uOpacity;
 
   varying vec2 vUv;
@@ -412,17 +270,15 @@ const NEBULA_FRAGMENT = /* glsl */ `
 
   void main() {
     vec2 uv = vUv - 0.5;
-    float clouds = fbm(vec3(uv * 3.4, uTime * 0.012));
+    float clouds = fbm(vec3(uv * 3.2, uTime * 0.01));
 
-    // Two light sources, one warm and one cool, positioned at opposite corners.
-    // Their relative strength swaps as the journey progresses.
-    float warmLight = exp(-length(uv - vec2(0.28, 0.30)) * 3.1) * (1.0 - uJourney);
-    float coolLight = exp(-length(uv + vec2(0.30, 0.26)) * 2.7) * uJourney;
+    // Two warm sources at opposite corners. Both stay warm as the journey
+    // advances; the light gets closer, not cooler.
+    float a = exp(-length(uv - vec2(0.26, 0.24)) * 3.0) * (0.7 + uJourney * 0.3);
+    float b = exp(-length(uv + vec2(0.28, 0.22)) * 2.6) * (0.4 + uJourney * 0.6);
 
-    vec3 color = uEmber * warmLight + uLapis * coolLight;
-    float density = smoothstep(0.35, 0.95, clouds) * (warmLight + coolLight);
-
-    // Fade out at the edges so the plane never shows its rectangular boundary.
+    vec3 color = uCopper * a + uGold * b;
+    float density = smoothstep(0.35, 0.95, clouds) * (a + b);
     float vignette = smoothstep(0.72, 0.12, length(uv));
 
     gl_FragColor = vec4(color, density * vignette * uOpacity);
@@ -430,39 +286,27 @@ const NEBULA_FRAGMENT = /* glsl */ `
 `
 
 /**
- * Where each formation owns the scroll, and where it hands over.
+ * The camera's path from outside the galaxy to inside its core.
  *
- * Plateaus matter as much as transitions: a formation needs a stretch where it
- * is simply itself and the reader can look at it, otherwise the page reads as
- * one continuous unresolved morph. The gaps between these ranges are the
- * cross-fades.
+ * `home` starts high above the disc so the spiral is legible as a shape. As the
+ * journey advances the camera descends toward the disc plane and closes on the
+ * core, so scrolling reads as flight rather than as zoom.
  */
-const FORMATION_SCHEDULE = {
-  ringUntil: 0.26,
-  columnFrom: 0.42,
-  columnUntil: 0.6,
-  terrainFrom: 0.78,
+const FLIGHT = {
+  // High and steep, so the spiral reads as a spiral. A shallow angle collapses
+  // the disc toward edge-on and it stops being recognisable as a galaxy.
+  start: { y: 30, z: 36 },
+  // Inside the core, near the disc plane — the arms sweep past the camera.
+  end: { y: 1.2, z: 3 },
 } as const
 
-/** Colour ramp axis and extent per formation, blended alongside the positions. */
-const COLOR_AXIS = {
-  ring: { axis: [0.42, 1] as const, scale: 4.28 },
-  column: { axis: [0.15, 1] as const, scale: 7.0 },
-  terrain: { axis: [1, 0.12] as const, scale: 13.0 },
-} as const
-
-const SCENE_STATE: Record<
-  SceneName,
-  { disperse: number; cameraZ: number; ringOpacity: number; galaxyOpacity: number }
-> = {
-  // Home: the ring is the subject and the galaxy is the light behind it.
-  home: { disperse: 0, cameraZ: 8.7, ringOpacity: 1, galaxyOpacity: 1 },
-  // Inner pages: pull back and loosen it so it reads as environment, not subject.
-  inner: { disperse: 0.55, cameraZ: 11.5, ringOpacity: 0.5, galaxyOpacity: 0.42 },
-  // Long-form reading: further still, and dim enough to never fight the text.
-  // The galaxy dims hardest — it is the brightest object, so it is the one that
-  // would cost legibility behind a column of Persian body copy.
-  reading: { disperse: 1.05, cameraZ: 14.5, ringOpacity: 0.26, galaxyOpacity: 0.16 },
+/** Extra pull-back per route, so inner pages don't sit in the reader's way. */
+const SCENE_STATE: Record<SceneName, { pullback: number; galaxyOpacity: number }> = {
+  home: { pullback: 0, galaxyOpacity: 1 },
+  inner: { pullback: 9, galaxyOpacity: 0.5 },
+  // Long-form reading: the galaxy is the brightest thing on the page, so it is
+  // the one that would cost legibility behind a column of Persian body copy.
+  reading: { pullback: 14, galaxyOpacity: 0.24 },
 }
 
 /** Frame-rate-independent easing toward a target. */
@@ -475,25 +319,10 @@ const smoothstep = (edge0: number, edge1: number, x: number) => {
   return t * t * (3 - 2 * t)
 }
 
-/**
- * Scroll progress → the three formation weights.
- *
- * Returns weights that always sum to 1, so the vertex shader's blend is a true
- * interpolation and points never drift toward the origin mid-transition (which
- * is what happens if the weights are allowed to under-sum).
- */
-function formationWeights(journey: number): [number, number, number] {
-  const { ringUntil, columnFrom, columnUntil, terrainFrom } = FORMATION_SCHEDULE
-
-  const toColumn = smoothstep(ringUntil, columnFrom, journey)
-  const toTerrain = smoothstep(columnUntil, terrainFrom, journey)
-
-  const ring = 1 - toColumn
-  const column = toColumn * (1 - toTerrain)
-  const terrain = toColumn * toTerrain
-
-  return [ring, column, terrain]
-}
+/** How close, in NDC, the pointer must be to the core to count as "on" it. */
+const CORE_HIT_RADIUS = 0.14
+/** Where proximity glow starts ramping up. */
+const CORE_GLOW_RADIUS = 0.42
 
 export class CosmosEngine {
   private renderer: THREE.WebGLRenderer
@@ -502,14 +331,12 @@ export class CosmosEngine {
   private clock = new THREE.Clock()
   private sprite: THREE.Texture
 
-  private ring!: THREE.Points
-  private ringMaterial!: THREE.ShaderMaterial
+  private galaxy!: THREE.Points
+  private galaxyMaterial!: THREE.ShaderMaterial
   private starLayers: THREE.Points[] = []
   private starMaterials: THREE.ShaderMaterial[] = []
   private nebula!: THREE.Mesh
   private nebulaMaterial!: THREE.ShaderMaterial
-  private galaxy!: THREE.Points
-  private galaxyMaterial!: THREE.ShaderMaterial
 
   private budget: CosmosBudget
   private reducedMotion: boolean
@@ -518,18 +345,20 @@ export class CosmosEngine {
   private running = false
   private visible = true
 
-  /** Target values, eased toward every frame. */
   private targetScene: SceneName = 'home'
   private journey = 0
   private targetJourney = 0
   private pointer = new THREE.Vector2(0, 0)
   private targetPointer = new THREE.Vector2(0, 0)
-  private pointerForce = 0
-  private targetPointerForce = 0
-  private disperse = 0
-  private cameraZ = SCENE_STATE.home.cameraZ
-  private ringOpacity = 1
+  private pointerActive = false
   private galaxyOpacity = 1
+  private pullback = 0
+  private coreGlow = 0
+
+  /** Core position in NDC, recomputed each frame. */
+  private coreNdc = new THREE.Vector2(0, 0)
+  /** 0..1 pointer proximity to the core. Read by the React layer for cursor state. */
+  private coreProximity = 0
 
   private ripples: THREE.Vector4[] = Array.from(
     { length: MAX_RIPPLES },
@@ -544,100 +373,44 @@ export class CosmosEngine {
     this.renderer = new THREE.WebGLRenderer({
       canvas,
       alpha: true,
-      antialias: false, // points are already soft; MSAA buys nothing here
+      antialias: false,
       powerPreference: 'high-performance',
-      failIfMajorPerformanceCaveat: false,
     })
     this.renderer.setClearColor(0x000000, 0)
     this.renderer.outputColorSpace = THREE.SRGBColorSpace
 
-    this.camera = new THREE.PerspectiveCamera(52, 1, 0.1, 120)
-    this.camera.position.set(0, 0, SCENE_STATE.home.cameraZ)
-    this.cameraZ = SCENE_STATE.home.cameraZ
+    this.camera = new THREE.PerspectiveCamera(55, 1, 0.1, 260)
+    this.camera.position.set(0, FLIGHT.start.y, FLIGHT.start.z)
 
     this.sprite = createSpriteTexture()
 
     this.buildNebula()
     this.buildGalaxy()
     this.buildStars()
-    this.buildRing()
 
     this.resize()
   }
 
   /* ── construction ─────────────────────────────────────────────────────── */
 
-  private buildRing() {
-    const { cellsU, cellsV, pointsPerSegment } = this.budget.girihCells
-    const cloud = buildGirihTorus({ cellsU, cellsV, pointsPerSegment })
-    const { column, terrain } = buildFormations(cloud)
-
-    const geometry = new THREE.BufferGeometry()
-    geometry.setAttribute('position', new THREE.BufferAttribute(cloud.positions, 3))
-    geometry.setAttribute('aSeed', new THREE.BufferAttribute(cloud.seed, 1))
-    geometry.setAttribute('aRingAngle', new THREE.BufferAttribute(cloud.ringAngle, 1))
-    geometry.setAttribute('aTubeAngle', new THREE.BufferAttribute(cloud.tubeAngle, 1))
-    geometry.setAttribute('aColumn', new THREE.BufferAttribute(column, 3))
-    geometry.setAttribute('aTerrain', new THREE.BufferAttribute(terrain, 3))
-
-    this.ringMaterial = new THREE.ShaderMaterial({
-      vertexShader: GIRIH_VERTEX,
-      fragmentShader: GIRIH_FRAGMENT,
-      transparent: true,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-      uniforms: {
-        uTime: { value: 0 },
-        uJourney: { value: 0 },
-        uDisperse: { value: 0 },
-        // Turbulence amplitude, in world units. This is the single knob that
-        // decides whether the ring reads as crisp geometry or as living plasma.
-        uTurbulence: { value: 1.35 },
-        uPixelRatio: { value: this.renderer.getPixelRatio() },
-        // Small and dim per point. The strands are dense, so energy per point
-        // must stay low or overlapping sprites additively clip to white and
-        // bleach the ember/firouzeh poles out of the ring.
-        uSize: { value: 2.15 },
-        uPointer: { value: new THREE.Vector3(999, 999, 999) },
-        uPointerForce: { value: 0 },
-        uRipples: { value: this.ripples },
-        uEmber: { value: EMBER },
-        uEmberHot: { value: EMBER_HOT },
-        uLapis: { value: LAPIS },
-        uCyan: { value: CYAN },
-        uOpacity: { value: 1 },
-        // Starts fully on the ring; scroll rebalances toward column then terrain.
-        uFormation: { value: new THREE.Vector3(1, 0, 0) },
-        uColorAxis: { value: new THREE.Vector2(...COLOR_AXIS.ring.axis) },
-        uColorScale: { value: COLOR_AXIS.ring.scale },
-      },
-    })
-
-    this.ring = new THREE.Points(geometry, this.ringMaterial)
-    // Nearly face-on, with just enough tilt to give the ring volume rather than
-    // reading as a flat circle. This also keeps model-space Y aligned with
-    // screen-vertical, which is what the fragment shader's colour ramp depends
-    // on: tilt it toward edge-on and the ember/firouzeh split rotates into the
-    // depth axis and disappears.
-    this.ring.rotation.x = RING_TILT
-    this.scene.add(this.ring)
-  }
-
   private buildGalaxy() {
     const cloud = buildGalaxy({ count: this.budget.galaxyCount })
 
     const geometry = new THREE.BufferGeometry()
-    // A dummy `position` attribute keeps three.js's frustum culling and draw
-    // count happy; the real position is reconstructed from polar coordinates
-    // in the vertex shader.
-    geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(cloud.count * 3), 3))
+    // Dummy `position`; the real position is rebuilt from polar coordinates in
+    // the vertex shader each frame.
+    geometry.setAttribute(
+      'position',
+      new THREE.BufferAttribute(new Float32Array(cloud.count * 3), 3),
+    )
     geometry.setAttribute('aRadius', new THREE.BufferAttribute(cloud.radius, 1))
     geometry.setAttribute('aAngle', new THREE.BufferAttribute(cloud.angle, 1))
     geometry.setAttribute('aHeight', new THREE.BufferAttribute(cloud.height, 1))
     geometry.setAttribute('aSeed', new THREE.BufferAttribute(cloud.seed, 1))
-    // Culling would pop the whole disc out of view, since the dummy positions
-    // put every vertex at the origin.
-    geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(), DEFAULT_GALAXY.radius * 1.2)
+    geometry.setAttribute('aKind', new THREE.BufferAttribute(cloud.kind, 1))
+    // Without this, culling would pop the whole disc — every dummy vertex is at
+    // the origin, so three.js computes a zero-radius bounding sphere.
+    geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(), DEFAULT_GALAXY.radius * 2)
 
     this.galaxyMaterial = new THREE.ShaderMaterial({
       vertexShader: GALAXY_VERTEX,
@@ -648,42 +421,33 @@ export class CosmosEngine {
       uniforms: {
         uTime: { value: 0 },
         uPixelRatio: { value: this.renderer.getPixelRatio() },
-        uSize: { value: 1.35 },
-        uSpin: { value: 0.85 },
+        uSize: { value: 1.5 },
+        uSpin: { value: 0.9 },
         uOuterRadius: { value: DEFAULT_GALAXY.radius },
-        uCore: { value: GALAXY_CORE },
-        uEmber: { value: EMBER },
-        uLapis: { value: LAPIS },
-        uCyan: { value: CYAN },
+        uCoreGlow: { value: 0 },
+        uJourney: { value: 0 },
+        uRipples: { value: this.ripples },
+        uCore: { value: CORE_HOT },
+        uGold: { value: GOLD },
+        uCopper: { value: COPPER },
+        uEmber: { value: EMBER_DEEP },
         uOpacity: { value: 1 },
       },
     })
 
     this.galaxy = new THREE.Points(geometry, this.galaxyMaterial)
-
-    // Deliberately off-axis, up and to the left, spilling past the frame edge.
-    //
-    // Centred behind the ring it sat squarely in the ring's opening — which is
-    // exactly where the hero headline goes. A bright galactic core behind
-    // Persian body text destroys legibility, and two concentric round objects
-    // read as a target rather than as depth. Pushed into the corner it does
-    // what it should: light the scene from behind and suggest scale.
-    //
-    // Upper-left is also the *end* of the reading path in RTL, so it draws the
-    // eye onward rather than fighting the headline for first attention.
-    this.galaxy.position.set(-19, 7.5, -30)
-    // Tilted enough to read as a disc in perspective, not so steep it collapses
-    // to an edge-on line.
-    this.galaxy.rotation.set(0.86, 0.24, 0.58)
+    // Centred at the origin: it is the subject, and the core has to sit at
+    // screen centre for the assistant interaction to make sense.
+    this.galaxy.rotation.set(0, 0, 0)
     this.scene.add(this.galaxy)
   }
 
   private buildStars() {
-    const radii = [46, 30, 19]
+    const radii = [150, 110, 80]
 
     this.budget.starCounts.forEach((count, index) => {
       if (count <= 0) return
-      const shell = buildStarShell(count, radii[index] ?? 24)
+      const shell = buildStarShell(count, radii[index] ?? 100)
 
       const geometry = new THREE.BufferGeometry()
       geometry.setAttribute('position', new THREE.BufferAttribute(shell.positions, 3))
@@ -698,12 +462,11 @@ export class CosmosEngine {
         uniforms: {
           uTime: { value: 0 },
           uPixelRatio: { value: this.renderer.getPixelRatio() },
-          uSize: { value: 1.8 + index * 0.85 },
-          uDrift: { value: 0.16 * (index + 1) },
+          uSize: { value: 2.2 + index * 0.9 },
+          uDrift: { value: 0.2 * (index + 1) },
           uWarm: { value: STAR_WARM },
-          uCool: { value: STAR_COOL },
-          uOpacity: { value: 1.05 - index * 0.1 },
-          uJourney: { value: 0 },
+          uPale: { value: STAR_PALE },
+          uOpacity: { value: 0.9 - index * 0.1 },
         },
       })
 
@@ -715,7 +478,7 @@ export class CosmosEngine {
   }
 
   private buildNebula() {
-    const geometry = new THREE.PlaneGeometry(90, 60)
+    const geometry = new THREE.PlaneGeometry(260, 180)
     this.nebulaMaterial = new THREE.ShaderMaterial({
       vertexShader: NEBULA_VERTEX,
       fragmentShader: NEBULA_FRAGMENT,
@@ -725,16 +488,16 @@ export class CosmosEngine {
       uniforms: {
         uTime: { value: 0 },
         uJourney: { value: 0 },
-        uEmber: { value: EMBER },
-        uLapis: { value: LAPIS },
-        // Raised now that the galaxy carries the composition's light. Still
-        // restrained: haze inside the ring's centre is what would turn this
-        // from cinematic to muddy, so the nebula lifts the corners, not the middle.
-        uOpacity: { value: 0.44 },
+        uCopper: { value: COPPER },
+        uGold: { value: GOLD },
+        // Very low. The palette budget is 60% *unlit* void, and ambient haze is
+        // the fastest way to spend that budget without noticing: raise this and
+        // the whole frame turns brown, which is exactly what 60:30:10 forbids.
+        uOpacity: { value: 0.13 },
       },
     })
     this.nebula = new THREE.Mesh(geometry, this.nebulaMaterial)
-    this.nebula.position.z = -26
+    this.nebula.position.z = -110
     this.scene.add(this.nebula)
   }
 
@@ -748,17 +511,25 @@ export class CosmosEngine {
     this.targetJourney = Math.min(1, Math.max(0, value))
   }
 
-  /** Pointer in normalised device coordinates (-1..1). */
   setPointer(x: number, y: number, active: boolean) {
-    if (!this.budget.interactive) return
     this.targetPointer.set(x, y)
-    this.targetPointerForce = active ? 1 : 0
+    this.pointerActive = active
   }
 
-  /** Emit an expanding ripple from a pointer position in NDC. */
-  pulse(x: number, y: number) {
-    if (!this.budget.interactive || this.reducedMotion) return
+  /** 0..1 — how close the pointer is to the galactic core. */
+  getCoreProximity(): number {
+    return this.coreProximity
+  }
 
+  /** True when a click at the current pointer position should open the assistant. */
+  isPointerOnCore(): boolean {
+    if (!this.pointerActive) return false
+    return this.pointer.distanceTo(this.coreNdc) < CORE_HIT_RADIUS
+  }
+
+  /** Emit an expanding ripple through the dust from a pointer position in NDC. */
+  pulse(x: number, y: number) {
+    if (this.reducedMotion) return
     const origin = new THREE.Vector3(x, y, 0.5).unproject(this.camera)
     const slot = this.ripples[this.nextRipple % MAX_RIPPLES]!
     slot.set(origin.x, origin.y, origin.z, 0)
@@ -780,7 +551,6 @@ export class CosmosEngine {
     this.camera.aspect = width / height
     this.camera.updateProjectionMatrix()
 
-    this.ringMaterial.uniforms.uPixelRatio!.value = pixelRatio
     this.galaxyMaterial.uniforms.uPixelRatio!.value = pixelRatio
     for (const material of this.starMaterials) {
       material.uniforms.uPixelRatio!.value = pixelRatio
@@ -793,7 +563,6 @@ export class CosmosEngine {
     this.clock.start()
 
     if (this.reducedMotion) {
-      // One frame, then stop. The universe is present but perfectly still.
       this.renderFrame(0)
       this.running = false
       return
@@ -805,7 +574,6 @@ export class CosmosEngine {
     const loop = () => {
       this.rafId = requestAnimationFrame(loop)
       const dt = Math.min(this.clock.getDelta(), 0.05)
-
       if (!this.visible) return
 
       accumulated += dt
@@ -845,99 +613,62 @@ export class CosmosEngine {
     const time = this.clock.getElapsedTime()
     const target = SCENE_STATE[this.targetScene]
 
-    // Ease every driven value so scroll and route changes glide rather than cut.
-    this.journey = damp(this.journey, this.targetJourney, 3.5, dt)
-    this.disperse = damp(this.disperse, target.disperse, 2.2, dt)
-    this.cameraZ = damp(this.cameraZ, target.cameraZ, 2.2, dt)
-    this.ringOpacity = damp(this.ringOpacity, target.ringOpacity, 3, dt)
+    this.journey = damp(this.journey, this.targetJourney, 3, dt)
     this.galaxyOpacity = damp(this.galaxyOpacity, target.galaxyOpacity, 3, dt)
+    this.pullback = damp(this.pullback, target.pullback, 2.4, dt)
     this.pointer.x = damp(this.pointer.x, this.targetPointer.x, 6, dt)
     this.pointer.y = damp(this.pointer.y, this.targetPointer.y, 6, dt)
-    this.pointerForce = damp(this.pointerForce, this.targetPointerForce, 5, dt)
 
-    const [wRing, wColumn, wTerrain] = formationWeights(this.journey)
+    // ── Flight path ──────────────────────────────────────────────────────
+    // Eased so the approach decelerates near the core; a linear dolly reads as
+    // a zoom, and the whole point is that this should feel like flight.
+    const t = smoothstep(0, 1, this.journey)
+    const y = FLIGHT.start.y + (FLIGHT.end.y - FLIGHT.start.y) * t
+    const z = FLIGHT.start.z + (FLIGHT.end.z - FLIGHT.start.z) * t
 
-    // Camera: parallax from the pointer, dolly from the scene, plus a slow
-    // drift so the shot is never completely locked off. As the terrain takes
-    // over, the camera lifts and tips down toward it — a landscape viewed dead
-    // level reads as a flat line rather than as ground receding to a horizon.
-    const lookY = -2.6 * wTerrain
-    this.camera.position.x = this.pointer.x * 0.85 + Math.sin(time * 0.07) * 0.14
-    this.camera.position.y =
-      this.pointer.y * 0.6 + Math.cos(time * 0.06) * 0.1 + wTerrain * 1.9
-    this.camera.position.z = this.cameraZ
-    this.camera.lookAt(0, lookY, 0)
+    this.camera.position.x = this.pointer.x * 1.6 + Math.sin(time * 0.06) * 0.3
+    this.camera.position.y = y + this.pointer.y * 1.1 + Math.cos(time * 0.05) * 0.2
+    this.camera.position.z = z + this.pullback
+    this.camera.lookAt(0, 0, 0)
 
-    // Project the pointer onto the ring plane so the gravity well tracks the
-    // cursor in world space rather than in screen space.
-    const pointerWorld = new THREE.Vector3(this.pointer.x, this.pointer.y, 0.5).unproject(
-      this.camera,
-    )
-    this.ringMaterial.uniforms.uPointer!.value.copy(pointerWorld)
-    this.ringMaterial.uniforms.uPointerForce!.value = this.pointerForce
-    this.ringMaterial.uniforms.uTime!.value = time
-    this.ringMaterial.uniforms.uJourney!.value = this.journey
-    this.ringMaterial.uniforms.uDisperse!.value = this.disperse
-    this.ringMaterial.uniforms.uOpacity!.value = this.ringOpacity
+    // ── Core proximity ───────────────────────────────────────────────────
+    // The core is the galaxy's origin. Project it to NDC and measure against
+    // the pointer, so the hit target follows the core wherever the flight
+    // path puts it on screen.
+    const core = new THREE.Vector3(0, 0, 0).project(this.camera)
+    this.coreNdc.set(core.x, core.y)
 
-    // ── Formation morph ──────────────────────────────────────────────────
-    this.ringMaterial.uniforms.uFormation!.value.set(wRing, wColumn, wTerrain)
+    const distance = this.pointerActive ? this.pointer.distanceTo(this.coreNdc) : Infinity
+    const proximityTarget = this.pointerActive
+      ? 1 - smoothstep(CORE_HIT_RADIUS, CORE_GLOW_RADIUS, distance)
+      : 0
+    this.coreProximity = proximityTarget
+    this.coreGlow = damp(this.coreGlow, proximityTarget, 7, dt)
 
-    // The colour ramp's axis and extent blend alongside the positions, so the
-    // gradient rotates with the shape instead of snapping when it hands over.
-    const axisX =
-      COLOR_AXIS.ring.axis[0] * wRing +
-      COLOR_AXIS.column.axis[0] * wColumn +
-      COLOR_AXIS.terrain.axis[0] * wTerrain
-    const axisY =
-      COLOR_AXIS.ring.axis[1] * wRing +
-      COLOR_AXIS.column.axis[1] * wColumn +
-      COLOR_AXIS.terrain.axis[1] * wTerrain
+    // ── Uniforms ─────────────────────────────────────────────────────────
+    this.galaxyMaterial.uniforms.uTime!.value = time
+    this.galaxyMaterial.uniforms.uJourney!.value = this.journey
+    this.galaxyMaterial.uniforms.uCoreGlow!.value = this.coreGlow
+    this.galaxyMaterial.uniforms.uOpacity!.value = this.galaxyOpacity
 
-    this.ringMaterial.uniforms.uColorAxis!.value.set(axisX, axisY)
-    this.ringMaterial.uniforms.uColorScale!.value =
-      COLOR_AXIS.ring.scale * wRing +
-      COLOR_AXIS.column.scale * wColumn +
-      COLOR_AXIS.terrain.scale * wTerrain
-
-    // Ring rotation, slow enough to read as orbital mechanics rather than a
-    // spinner. Spinning about Z carries the lattice *through* the fixed colour
-    // ramp, so the pattern moves while the ember/firouzeh poles stay anchored.
-    // Scaled by the ring's own weight: the terrain must not rotate, or the
-    // landscape rolls sideways as it takes over.
-    this.ring.rotation.z += dt * 0.035 * wRing
-    this.ring.rotation.x = RING_TILT * wRing + Math.sin(time * 0.09) * 0.045 * wRing
-
-    // Age the ripples; a negative age marks the slot free.
     for (const ripple of this.ripples) {
       if (ripple.w >= 0) {
         ripple.w += dt
-        if (ripple.w > 3.2) ripple.w = -1
+        if (ripple.w > 3.0) ripple.w = -1
       }
     }
 
     for (const material of this.starMaterials) {
       material.uniforms.uTime!.value = time
-      material.uniforms.uJourney!.value = this.journey
     }
-
-    this.galaxyMaterial.uniforms.uTime!.value = time
-    // Fades out as the scroll journey advances as well as by route: by the time
-    // the terrain takes over we are conceptually somewhere else entirely.
-    this.galaxyMaterial.uniforms.uOpacity!.value =
-      this.galaxyOpacity * (1 - this.journey * 0.72)
-
-    // A slow drift of the whole disc, on top of the shader's differential
-    // rotation, so the galaxy never looks pinned to the viewport.
-    this.galaxy.rotation.z += dt * 0.006
 
     this.nebulaMaterial.uniforms.uTime!.value = time
     this.nebulaMaterial.uniforms.uJourney!.value = this.journey
 
-    // Star shells counter-rotate very slightly against the ring, which reads as
-    // depth far more convincingly than parallax translation alone.
+    // Star shells counter-rotate very slightly, which reads as depth far more
+    // convincingly than parallax translation alone.
     this.starLayers.forEach((layer, index) => {
-      layer.rotation.y += dt * 0.004 * (index + 1)
+      layer.rotation.y += dt * 0.003 * (index + 1)
     })
 
     this.renderer.render(this.scene, this.camera)

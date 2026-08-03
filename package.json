@@ -17,8 +17,7 @@
     "migrate:create": "payload migrate:create",
     "db:setup": "tsx scripts/setup-db.ts",
     "seed": "tsx scripts/seed.ts",
-    "cosmos:preview": "tsx scripts/preview-cosmos.ts",
-    "verify:girih": "tsx scripts/verify-girih.ts"
+    "cosmos:preview": "tsx scripts/preview-cosmos.ts"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "^3.0.20",

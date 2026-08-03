@@ -43,7 +43,7 @@ export function SiteHeader() {
           href="/"
           className="flex items-center gap-3 text-lg text-text-100 transition-colors hover:text-white"
         >
-          <GirihMark />
+          <CoreMark />
           <BrandName variant="mark" className="text-base" />
         </Link>
 
@@ -122,20 +122,27 @@ export function SiteHeader() {
   )
 }
 
-/** A single girih rosette, reused from the cosmos geometry as the wordmark. */
-function GirihMark() {
-  const points = 10
-  const outer = 11
-  const inner = outer * 0.42
-  const path = Array.from({ length: points * 2 }, (_, index) => {
-    const angle = (index / (points * 2)) * Math.PI * 2 - Math.PI / 2
-    const radius = index % 2 === 0 ? outer : inner
-    return `${(Math.cos(angle) * radius + 12).toFixed(2)},${(Math.sin(angle) * radius + 12).toFixed(2)}`
-  }).join(' ')
-
+/**
+ * The mark: a bright core inside a tilted orbit — the galaxy, reduced to the
+ * two things that make it legible at 24px. It deliberately echoes the hero,
+ * so the logo reads as the same object the visitor just clicked.
+ */
+function CoreMark() {
   return (
-    <svg viewBox="0 0 24 24" className="size-6 text-accent" aria-hidden="true">
-      <polygon points={path} fill="none" stroke="currentColor" strokeWidth="0.9" />
+    <svg viewBox="0 0 24 24" className="size-6" aria-hidden="true">
+      <ellipse
+        cx="12"
+        cy="12"
+        rx="10.5"
+        ry="4.6"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="0.9"
+        className="text-accent/45"
+        transform="rotate(-22 12 12)"
+      />
+      <circle cx="12" cy="12" r="2.6" className="fill-accent/25" />
+      <circle cx="12" cy="12" r="1.35" className="fill-core-100" />
     </svg>
   )
 }
