@@ -144,7 +144,12 @@ Caddy (TLS) ──▶ Next.js 16 ──┬──▶ Postgres 17 + pgvector
                              └──▶ MinIO       (S3 :9000)
 ```
 
-Full detail, including the data model and the RAG pipeline, in
+**[`docs/DIAGRAMS.md`](docs/DIAGRAMS.md)** — nine Mermaid diagrams covering the
+deployment topology, data model, publish→index pipeline, chat request sequence,
+where privacy consent is enforced, the cosmos formation state machine, and the
+degradation ladder. They render inline on GitHub.
+
+Full written detail, including the data model and the RAG pipeline, in
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ### Swapping the model
