@@ -28,20 +28,31 @@ export function Section({
   id?: string
 }) {
   return (
-    <section id={id} className={cn('relative px-6 py-28', className)}>
+    // `min-h-dvh` and generous padding give each section enough scroll distance
+    // for its reveal to play out and for the galaxy to complete a morph. Packed
+    // tighter, sections would be arriving and leaving simultaneously.
+    <section id={id} className={cn('relative flex min-h-dvh items-center px-6 py-32', className)}>
       <div className="bloom-layer" />
-      <div className="mx-auto max-w-7xl">
-        <header className="max-w-3xl">
-          {eyebrow ? <Pill className="mb-6">{eyebrow}</Pill> : null}
-          <h2 className="font-display text-3xl leading-fa-tight font-light text-text-100 sm:text-5xl">
-            {title} {titleTail ? <span className="heading-tail">{titleTail}</span> : null}
-          </h2>
-          {lead ? (
-            <p className="mt-6 text-base leading-fa-normal text-text-300 sm:text-lg">{lead}</p>
-          ) : null}
-        </header>
+      {/*
+        Two stacked animations rather than one: the content arrives, holds
+        "solid" while the galaxy sits in a morphology, then leaves as the next
+        morph begins. A single enter animation would leave everything stacked
+        and visible on the way out.
+      */}
+      <div className="reveal mx-auto w-full max-w-7xl">
+        <div className="reveal-out">
+          <header className="max-w-3xl">
+            {eyebrow ? <Pill className="mb-6">{eyebrow}</Pill> : null}
+            <h2 className="font-display text-3xl leading-fa-tight font-light text-text-100 sm:text-5xl">
+              {title} {titleTail ? <span className="heading-tail">{titleTail}</span> : null}
+            </h2>
+            {lead ? (
+              <p className="mt-6 text-base leading-fa-normal text-text-300 sm:text-lg">{lead}</p>
+            ) : null}
+          </header>
 
-        {children ? <div className="mt-14">{children}</div> : null}
+          {children ? <div className="mt-14">{children}</div> : null}
+        </div>
       </div>
     </section>
   )

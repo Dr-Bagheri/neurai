@@ -12,42 +12,53 @@
    if it drifts. Please don't add saturated colours outside the signal ramp.
    ═══════════════════════════════════════════════════════════════════════════ */
 
-@theme {
+/* `static` emits every variable, not only the ones some utility class happens to
+   reference. Tailwind v4 tree-shakes unused theme tokens by default, which
+   silently dropped star-blue, star-yellow and star-red from the stylesheet —
+   they are read by hand-written CSS and by the design system, not just by
+   generated utilities. A design token that vanishes when unused is not a token. */
+@theme static {
   /* ── 60% · Void ────────────────────────────────────────────────────────────
-     Not neutral black. Every void tone carries a slight red-brown cast, so the
-     dark areas read as *unlit warm space* rather than as absence of colour.
-     A neutral black under warm light looks like a printing error. */
-  --color-void-1000: #050303;
-  --color-void-950: #0a0706;
-  --color-void-900: #120d09;
-  --color-void-800: #1c150e;
+     Deep space with a blue-violet cast rather than neutral black. Neutral black
+     under a blue-and-purple scene reads as a dead pixel field; the faint cast
+     makes the dark areas read as *unlit space*. */
+  --color-void-1000: #04040a;
+  --color-void-950: #080814;
+  --color-void-900: #0d0d1c;
+  --color-void-800: #15142a;
 
   /* ── 30% · Structure ───────────────────────────────────────────────────────
-     Warm-white glass and cream text. The alpha whites are tinted warm too —
-     pure white glass over a warm scene reads as a cold smear. */
-  --color-glass-1: oklch(0.97 0.02 75 / 4%);
-  --color-glass-2: oklch(0.97 0.02 75 / 6.5%);
-  --color-glass-3: oklch(0.97 0.02 75 / 10%);
-  --color-hairline: oklch(0.97 0.02 75 / 9%);
-  --color-hairline-strong: oklch(0.97 0.02 75 / 16%);
-  --color-text-100: #f4ead9; /* cream — primary text */
-  --color-text-200: #d6c6ae;
-  --color-text-300: #a89179; /* muted — the dimmed half of two-tone headings */
-  --color-text-400: #6f5c48;
-  --color-graphite-700: #2a211a;
+     Starlight-white glass and text, very slightly cool. Pure neutral white over
+     a coloured scene looks like a hole punched in it. */
+  --color-glass-1: oklch(0.97 0.015 275 / 4.5%);
+  --color-glass-2: oklch(0.97 0.015 275 / 7%);
+  --color-glass-3: oklch(0.97 0.015 275 / 11%);
+  --color-hairline: oklch(0.97 0.015 275 / 10%);
+  --color-hairline-strong: oklch(0.97 0.015 275 / 18%);
+  --color-text-100: #eceaf7; /* starlight white — primary text */
+  --color-text-200: #c3bfda;
+  --color-text-300: #948eb4; /* muted — the dimmed half of two-tone headings */
+  --color-text-400: #5f5a7d;
+  --color-graphite-700: #221f38;
 
-  /* ── 10% · Signal ──────────────────────────────────────────────────────────
-     One warm ramp, core → rim. There is no cool pole any more: nothing on the
-     page is allowed to be blue, so warmth reads as a decision rather than as
-     a default. */
-  --color-core-100: #fff4de; /* the galactic core — brightest thing on the page */
-  --color-gold-200: #ffd9a0;
-  --color-gold-400: #ffb454; /* the single interactive accent */
-  --color-copper-500: #e07b3c;
-  --color-ember-700: #9c4a18;
-  --color-ember-900: #4d2109;
-  --color-accent: #ffb454; /* links, focus rings, primary CTA, chat send */
-  --color-accent-dim: #b87a34;
+  /* ── 10% · Signal · the stellar ramp ───────────────────────────────────────
+     Ordered as a real galaxy's populations read outward from the core: a hot
+     white-yellow nucleus of old stars, cooling through amber to red, then the
+     violet of ionised nebulae, and finally the blue of young stars in the outer
+     arms. Every saturated pixel on the page comes from this ramp. */
+  --color-star-white: #fff6d8; /* the core — brightest thing on the page */
+  --color-star-yellow: #ffd166;
+  --color-star-amber: #ff9a3c;
+  --color-star-red: #ff5e4d;
+  --color-star-violet: #a78bfa;
+  --color-star-blue: #7ea6ff;
+  --color-star-ice: #bfd4ff;
+
+  /* One interactive accent, drawn from the ramp: links, focus rings, primary
+     CTA, chat send. A blue-white star reads as "interactive" without colliding
+     with the yellow and red the galaxy uses decoratively. */
+  --color-accent: #9db4ff;
+  --color-accent-dim: #6076b8;
 
   /* ── Type ──────────────────────────────────────────────────────────────────
      Three faces, each doing one job.
@@ -191,21 +202,77 @@
   inset: 0;
   pointer-events: none;
   z-index: -1;
-  /* Both sources are warm. As the journey advances we are flying deeper into
-     the galaxy, so the light gets *closer and hotter*, not cooler — the second
-     gradient grows rather than swapping hue. */
+  /* Warm at the top, cool at the bottom, and the balance shifts as the galaxy
+     morphs — so the ambient light tracks the same journey the particles do. */
   background:
     radial-gradient(
       62% 52% at calc(76% - var(--pointer-x) * 4%) 2%,
-      color-mix(in oklab, var(--color-copper-500) calc(16% * (1 - var(--journey) * 0.5)), transparent)
+      color-mix(in oklab, var(--color-star-amber) calc(14% * (1 - var(--journey) * 0.6)), transparent)
         0%,
       transparent 70%
     ),
     radial-gradient(
       70% 62% at calc(22% + var(--pointer-x) * 4%) 98%,
-      color-mix(in oklab, var(--color-gold-400) calc(10% + 14% * var(--journey)), transparent) 0%,
+      color-mix(in oklab, var(--color-star-violet) calc(8% + 12% * var(--journey)), transparent) 0%,
       transparent 72%
     );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Scroll-driven section reveal.
+
+   Content arrives with the galaxy, settles while it holds its shape, and
+   leaves as the next morph begins — so nothing on the page is ever static.
+
+   Built on CSS scroll-driven animations rather than JavaScript: they run on the
+   compositor, so they cannot jank the WebGL frame budget, and there is no
+   observer bookkeeping to leak. Guarded by @supports, because the default state
+   is fully visible — a browser without support simply shows the content, which
+   is the only acceptable failure mode for body copy.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .reveal {
+      animation: reveal-in linear both;
+      animation-timeline: view();
+      /* Enters over the last 35% of approach, holds, leaves over the first 25%
+         of exit. The long middle is the "solid" state. */
+      animation-range: entry 10% cover 38%;
+    }
+
+    .reveal-out {
+      animation: reveal-out linear both;
+      animation-timeline: view();
+      animation-range: cover 68% exit 90%;
+    }
+  }
+}
+
+@keyframes reveal-in {
+  from {
+    opacity: 0;
+    transform: translateY(3.5rem) scale(0.97);
+    filter: blur(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
+
+@keyframes reveal-out {
+  from {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-2.5rem) scale(0.985);
+    filter: blur(5px);
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -337,21 +404,29 @@
    WebGL2 or with Save-Data on. The page must look finished with only this. */
 .cosmos-fallback {
   background:
-    /* the core, centre-screen — grows and brightens as we fly inward */
+    /* the core, centre-screen. Fixed size — the galaxy changes shape, it does
+       not grow, so the fallback must not zoom either. */
     radial-gradient(
-      calc(26% + var(--journey) * 46%) calc(26% + var(--journey) * 46%) at 50% 46%,
-      color-mix(in oklab, #fff4de calc(16% + 22% * var(--journey)), transparent) 0%,
-      color-mix(in oklab, #ffb454 calc(12% + 16% * var(--journey)), transparent) 34%,
-      transparent 72%
+      42% 30% at 50% 48%,
+      color-mix(in oklab, #fff6d8 22%, transparent) 0%,
+      color-mix(in oklab, #ffd166 16%, transparent) 26%,
+      color-mix(in oklab, #ff5e4d 10%, transparent) 48%,
+      transparent 74%
     ),
-    /* warm halo, offset by the pointer for a little parallax */
+    /* violet nebula, drifting with the journey */
     radial-gradient(
-      70% 58% at calc(62% - (var(--pointer-x) - 0.5) * 4%) calc(30% - var(--journey) * 8%),
-      color-mix(in oklab, #e07b3c 16%, transparent) 0%,
+      64% 52% at calc(26% + (var(--pointer-x) - 0.5) * 4%) calc(72% - var(--journey) * 12%),
+      color-mix(in oklab, #a78bfa 14%, transparent) 0%,
       transparent 70%
     ),
-    /* deep warm field */
-    radial-gradient(130% 100% at 50% 46%, #120d09 0%, #050303 76%);
+    /* blue outer arms */
+    radial-gradient(
+      70% 56% at calc(76% - (var(--pointer-x) - 0.5) * 4%) calc(26% + var(--journey) * 10%),
+      color-mix(in oklab, #7ea6ff 12%, transparent) 0%,
+      transparent 70%
+    ),
+    /* deep field */
+    radial-gradient(130% 100% at 50% 48%, #0d0d1c 0%, #04040a 76%);
   transition: background 600ms var(--ease-cinematic);
 }
 
@@ -363,12 +438,12 @@
   position: absolute;
   inset: 0;
   background-image:
-    radial-gradient(1px 1px at 12% 22%, #f4ead9 50%, transparent 50%),
-    radial-gradient(1px 1px at 78% 14%, #ffd9a0 50%, transparent 50%),
-    radial-gradient(1px 1px at 34% 68%, #fff4de 50%, transparent 50%),
-    radial-gradient(1px 1px at 62% 82%, #e07b3c 50%, transparent 50%),
-    radial-gradient(1px 1px at 88% 54%, #f4ead9 50%, transparent 50%),
-    radial-gradient(1px 1px at 22% 88%, #ffd9a0 50%, transparent 50%);
+    radial-gradient(1px 1px at 12% 22%, #bfd4ff 50%, transparent 50%),
+    radial-gradient(1px 1px at 78% 14%, #ffd166 50%, transparent 50%),
+    radial-gradient(1px 1px at 34% 68%, #fff6d8 50%, transparent 50%),
+    radial-gradient(1px 1px at 62% 82%, #a78bfa 50%, transparent 50%),
+    radial-gradient(1px 1px at 88% 54%, #7ea6ff 50%, transparent 50%),
+    radial-gradient(1px 1px at 22% 88%, #ff9a3c 50%, transparent 50%);
   background-size: 340px 340px;
   background-repeat: repeat;
   opacity: 0.5;

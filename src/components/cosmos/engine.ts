@@ -20,7 +20,7 @@
 
 import * as THREE from 'three'
 
-import { buildGalaxy, buildStarShell, DEFAULT_GALAXY } from './galaxy'
+import { buildGalaxy, buildStarShell, DEFAULT_GALAXY, shapeWeights } from './galaxy'
 import type { CosmosBudget } from './tier'
 
 export type SceneName = 'home' | 'inner' | 'reading'
@@ -32,12 +32,13 @@ const MAX_RIPPLES = 4
    the point, and a single blue particle would read as a bug. Values run hotter
    than the CSS tokens because additive blending against near-black desaturates
    everything it touches; these are pre-compensated to land on the token hues. */
-const CORE_HOT = new THREE.Color('#fff6e4')
-const GOLD = new THREE.Color('#ffb454')
-const COPPER = new THREE.Color('#e07b3c')
-const EMBER_DEEP = new THREE.Color('#8f3f14')
-const STAR_WARM = new THREE.Color('#ffe6c2')
-const STAR_PALE = new THREE.Color('#f6e3cb')
+const CORE_HOT = new THREE.Color('#fff6d8')
+const STAR_YELLOW = new THREE.Color('#ffd166')
+const STAR_AMBER = new THREE.Color('#ff9a3c')
+const STAR_RED = new THREE.Color('#ff5e4d')
+const STAR_VIOLET = new THREE.Color('#a78bfa')
+const STAR_BLUE = new THREE.Color('#7ea6ff')
+const STAR_ICE = new THREE.Color('#bfd4ff')
 
 /** Soft radial sprite, generated at runtime so there is no image to download. */
 function createSpriteTexture(): THREE.Texture {
@@ -80,11 +81,14 @@ const NOISE_GLSL = /* glsl */ `
 `
 
 const GALAXY_VERTEX = /* glsl */ `
-  attribute float aRadius;
-  attribute float aAngle;
-  attribute float aHeight;
+  // Four morphologies, each (radius, angle, height).
+  attribute vec3  aSpiral;
+  attribute vec3  aBarred;
+  attribute vec3  aElliptical;
+  attribute vec3  aRing;
   attribute float aSeed;
-  attribute float aKind;      // 0 bulge · 1 arm · 2 halo
+  attribute float aKind;      // 0 bulge · 1 disc · 2 halo
+  attribute float aRank;      // radial rank, stable across shapes
 
   uniform float uTime;
   uniform float uPixelRatio;
@@ -92,7 +96,9 @@ const GALAXY_VERTEX = /* glsl */ `
   uniform float uSpin;
   uniform float uOuterRadius;
   uniform float uCoreGlow;    // 0..1, pointer proximity to the core
-  uniform float uJourney;     // 0..1, how deep into the galaxy we have flown
+  uniform float uJourney;
+  uniform vec4  uShapes;      // weights: spiral, barred, elliptical, ring
+  uniform float uDeshape;     // 0..1, peaks mid-transition — the "coming apart"
   uniform vec4  uRipples[${MAX_RIPPLES}];
 
   varying float vSeed;
@@ -102,16 +108,37 @@ const GALAXY_VERTEX = /* glsl */ `
 
   ${NOISE_GLSL}
 
-  void main() {
-    // Differential rotation: angular velocity falls with radius, so arms trail
-    // and wind. A rigid rotation would read as a spinning picture.
-    float angle = aAngle + uTime * uSpin / (aRadius * 0.14 + 0.7);
+  /**
+   * Reconstruct a Cartesian position from one shape's polar parameters,
+   * applying differential rotation using *that shape's* radius. Rotating after
+   * blending would smear the shapes together; rotating per shape keeps each
+   * one turning at its own correct rate.
+   */
+  vec3 shapePosition(vec3 polar) {
+    float angle = polar.y + uTime * uSpin / (polar.x * 0.12 + 0.8);
+    return vec3(cos(angle) * polar.x, polar.z, sin(angle) * polar.x);
+  }
 
-    vec3 pos = vec3(cos(angle) * aRadius, aHeight, sin(angle) * aRadius);
+  void main() {
+    // Blend the four morphologies. Weights always sum to 1, so this is a true
+    // interpolation — if they under-summed, every particle would drift toward
+    // the origin mid-transition and the galaxy would collapse inward.
+    vec3 pos =
+        shapePosition(aSpiral)     * uShapes.x
+      + shapePosition(aBarred)     * uShapes.y
+      + shapePosition(aElliptical) * uShapes.z
+      + shapePosition(aRing)       * uShapes.w;
 
     // Gentle turbulence so the dust drifts rather than sitting on rails.
-    float n = noise(pos * 0.09 + vec3(0.0, uTime * 0.02, 0.0));
-    pos += vec3(n - 0.5, (n - 0.5) * 0.4, n - 0.5) * 0.9;
+    float n = noise(pos * 0.07 + vec3(0.0, uTime * 0.02, 0.0));
+    pos += vec3(n - 0.5, (n - 0.5) * 0.4, n - 0.5) * 1.1;
+
+    // "Deshape": mid-transition the structure comes apart before it reassembles.
+    // Without this the morph is a clean tween between two tidy shapes, which
+    // looks mechanical — real reorganisation passes through disorder.
+    float scatter = noise(pos * 0.16 + vec3(uTime * 0.05, 0.0, 3.7)) - 0.5;
+    pos += normalize(pos + 0.0001) * scatter * uDeshape * 16.0;
+    pos.y += scatter * uDeshape * 7.0;
 
     // Click ripples: an expanding shell that lifts dust as it passes.
     float boost = 0.0;
@@ -127,7 +154,10 @@ const GALAXY_VERTEX = /* glsl */ `
 
     vSeed = aSeed;
     vKind = aKind;
-    vRadial = clamp(aRadius / uOuterRadius, 0.0, 1.0);
+    // Colour keys off the *rank*, not the live radius: a particle keeps its
+    // stellar colour as the galaxy reshapes, so the morph moves stars around
+    // rather than repainting them.
+    vRadial = clamp(aRank, 0.0, 1.0);
     vBoost = clamp(boost, 0.0, 1.5);
 
     vec4 mv = modelViewMatrix * vec4(pos, 1.0);
@@ -149,9 +179,11 @@ const GALAXY_FRAGMENT = /* glsl */ `
   precision highp float;
 
   uniform vec3  uCore;
-  uniform vec3  uGold;
-  uniform vec3  uCopper;
-  uniform vec3  uEmber;
+  uniform vec3  uYellow;
+  uniform vec3  uAmber;
+  uniform vec3  uRed;
+  uniform vec3  uViolet;
+  uniform vec3  uBlue;
   uniform float uOpacity;
   uniform float uCoreGlow;
   uniform float uJourney;
@@ -167,11 +199,15 @@ const GALAXY_FRAGMENT = /* glsl */ `
     if (d > 0.5) discard;
     float alpha = smoothstep(0.5, 0.04, d);
 
-    // One warm ramp from core to rim. Hot cream at the centre, gold through the
-    // inner arms, copper mid-disc, deep ember at the edge. Nothing cools.
-    vec3 color = mix(uCore, uGold, smoothstep(0.0, 0.26, vRadial));
-    color = mix(color, uCopper, smoothstep(0.26, 0.62, vRadial));
-    color = mix(color, uEmber, smoothstep(0.62, 1.0, vRadial));
+    // The stellar ramp, read outward from the core exactly as a galaxy's
+    // populations do: a hot white-yellow nucleus of old stars, cooling through
+    // amber to red, then the violet of ionised nebulae, and finally the blue of
+    // young stars in the outer arms.
+    vec3 color = mix(uCore,   uYellow, smoothstep(0.00, 0.16, vRadial));
+    color      = mix(color,   uAmber,  smoothstep(0.16, 0.34, vRadial));
+    color      = mix(color,   uRed,    smoothstep(0.34, 0.52, vRadial));
+    color      = mix(color,   uViolet, smoothstep(0.52, 0.74, vRadial));
+    color      = mix(color,   uBlue,   smoothstep(0.74, 1.00, vRadial));
 
     // Pointing at the core heats the whole inner disc, not just the exact
     // centre — a light source that brightens without spilling looks like a
@@ -181,13 +217,14 @@ const GALAXY_FRAGMENT = /* glsl */ `
 
     color = mix(color, uCore, clamp(vBoost * 0.5, 0.0, 0.6));
 
-    // Brightness falls steeply outward: that is what makes the core read as a
-    // light source rather than as the middle of an evenly lit disc.
-    float falloff = mix(1.0, 0.09, smoothstep(0.0, 0.72, vRadial));
+    // Brightness falls outward: that is what makes the core read as a light
+    // source rather than as the middle of an evenly lit disc. Shallower than a
+    // warm-only palette needed, because the blue outer arms have to stay
+    // visible — they carry a third of the colour story.
+    float falloff = mix(1.0, 0.16, smoothstep(0.0, 0.8, vRadial));
     // The halo is faint by nature.
-    if (vKind > 1.5) falloff *= 0.35;
-    // Flying inward raises the ambient level, as though the light is closing in.
-    falloff *= 1.0 + uJourney * 0.5 + coreness * uCoreGlow * 1.2;
+    if (vKind > 1.5) falloff *= 0.4;
+    falloff *= 1.0 + coreness * uCoreGlow * 1.2;
 
     gl_FragColor = vec4(color, alpha * uOpacity * falloff * (0.45 + vSeed * 0.55));
   }
@@ -292,12 +329,20 @@ const NEBULA_FRAGMENT = /* glsl */ `
  * journey advances the camera descends toward the disc plane and closes on the
  * core, so scrolling reads as flight rather than as zoom.
  */
+/**
+ * The camera barely moves.
+ *
+ * The galaxy is large from the first frame and never grows — scrolling changes
+ * its *shape*, not its distance. A dolly would fight the morph for the
+ * viewer's attention and make the size change read as the main event.
+ *
+ * What little movement there is exists to keep the shot alive: a slow tilt down
+ * toward the disc plane so the elliptical stage reads as a volume rather than a
+ * flat blob, and a small dolly to keep each morphology framed.
+ */
 const FLIGHT = {
-  // High and steep, so the spiral reads as a spiral. A shallow angle collapses
-  // the disc toward edge-on and it stops being recognisable as a galaxy.
-  start: { y: 30, z: 36 },
-  // Inside the core, near the disc plane — the arms sweep past the camera.
-  end: { y: 1.2, z: 3 },
+  start: { y: 38, z: 46 },
+  end: { y: 22, z: 54 },
 } as const
 
 /** Extra pull-back per route, so inner pages don't sit in the reader's way. */
@@ -403,11 +448,13 @@ export class CosmosEngine {
       'position',
       new THREE.BufferAttribute(new Float32Array(cloud.count * 3), 3),
     )
-    geometry.setAttribute('aRadius', new THREE.BufferAttribute(cloud.radius, 1))
-    geometry.setAttribute('aAngle', new THREE.BufferAttribute(cloud.angle, 1))
-    geometry.setAttribute('aHeight', new THREE.BufferAttribute(cloud.height, 1))
+    geometry.setAttribute('aSpiral', new THREE.BufferAttribute(cloud.shapes.spiral, 3))
+    geometry.setAttribute('aBarred', new THREE.BufferAttribute(cloud.shapes.barred, 3))
+    geometry.setAttribute('aElliptical', new THREE.BufferAttribute(cloud.shapes.elliptical, 3))
+    geometry.setAttribute('aRing', new THREE.BufferAttribute(cloud.shapes.ring, 3))
     geometry.setAttribute('aSeed', new THREE.BufferAttribute(cloud.seed, 1))
     geometry.setAttribute('aKind', new THREE.BufferAttribute(cloud.kind, 1))
+    geometry.setAttribute('aRank', new THREE.BufferAttribute(cloud.rank, 1))
     // Without this, culling would pop the whole disc — every dummy vertex is at
     // the origin, so three.js computes a zero-radius bounding sphere.
     geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(), DEFAULT_GALAXY.radius * 2)
@@ -426,11 +473,15 @@ export class CosmosEngine {
         uOuterRadius: { value: DEFAULT_GALAXY.radius },
         uCoreGlow: { value: 0 },
         uJourney: { value: 0 },
+        uShapes: { value: new THREE.Vector4(1, 0, 0, 0) },
+        uDeshape: { value: 0 },
         uRipples: { value: this.ripples },
         uCore: { value: CORE_HOT },
-        uGold: { value: GOLD },
-        uCopper: { value: COPPER },
-        uEmber: { value: EMBER_DEEP },
+        uYellow: { value: STAR_YELLOW },
+        uAmber: { value: STAR_AMBER },
+        uRed: { value: STAR_RED },
+        uViolet: { value: STAR_VIOLET },
+        uBlue: { value: STAR_BLUE },
         uOpacity: { value: 1 },
       },
     })
@@ -464,8 +515,8 @@ export class CosmosEngine {
           uPixelRatio: { value: this.renderer.getPixelRatio() },
           uSize: { value: 2.2 + index * 0.9 },
           uDrift: { value: 0.2 * (index + 1) },
-          uWarm: { value: STAR_WARM },
-          uPale: { value: STAR_PALE },
+          uWarm: { value: STAR_ICE },
+          uPale: { value: STAR_YELLOW },
           uOpacity: { value: 0.9 - index * 0.1 },
         },
       })
@@ -488,8 +539,8 @@ export class CosmosEngine {
       uniforms: {
         uTime: { value: 0 },
         uJourney: { value: 0 },
-        uCopper: { value: COPPER },
-        uGold: { value: GOLD },
+        uCopper: { value: STAR_AMBER },
+        uGold: { value: STAR_VIOLET },
         // Very low. The palette budget is 60% *unlit* void, and ambient haze is
         // the fastest way to spend that budget without noticing: raise this and
         // the whole frame turns brown, which is exactly what 60:30:10 forbids.
@@ -619,9 +670,7 @@ export class CosmosEngine {
     this.pointer.x = damp(this.pointer.x, this.targetPointer.x, 6, dt)
     this.pointer.y = damp(this.pointer.y, this.targetPointer.y, 6, dt)
 
-    // ── Flight path ──────────────────────────────────────────────────────
-    // Eased so the approach decelerates near the core; a linear dolly reads as
-    // a zoom, and the whole point is that this should feel like flight.
+    // ── Camera ───────────────────────────────────────────────────────────
     const t = smoothstep(0, 1, this.journey)
     const y = FLIGHT.start.y + (FLIGHT.end.y - FLIGHT.start.y) * t
     const z = FLIGHT.start.z + (FLIGHT.end.z - FLIGHT.start.z) * t
@@ -644,6 +693,16 @@ export class CosmosEngine {
       : 0
     this.coreProximity = proximityTarget
     this.coreGlow = damp(this.coreGlow, proximityTarget, 7, dt)
+
+    // ── Morphology ───────────────────────────────────────────────────────
+    const [wSpiral, wBarred, wElliptical, wRing] = shapeWeights(this.journey)
+    this.galaxyMaterial.uniforms.uShapes!.value.set(wSpiral, wBarred, wElliptical, wRing)
+
+    // "Deshape" peaks whenever no single morphology dominates — that is, in the
+    // middle of a transition. Derived from the weights rather than tracked
+    // separately, so it can never drift out of sync with the morph it belongs to.
+    const dominant = Math.max(wSpiral, wBarred, wElliptical, wRing)
+    this.galaxyMaterial.uniforms.uDeshape!.value = smoothstep(1, 0.45, dominant)
 
     // ── Uniforms ─────────────────────────────────────────────────────────
     this.galaxyMaterial.uniforms.uTime!.value = time

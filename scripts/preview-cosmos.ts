@@ -1,15 +1,14 @@
 /**
  * Offline preview of the cosmos.
  *
- * Renders the same galaxy the GPU does, with a software additive blend,
- * straight to PNG. Two reasons this exists:
+ * Renders each of the four galaxy morphologies the way the GPU does, with a
+ * software additive blend, straight to PNG. Two reasons this exists:
  *
- *   1. The design is reviewable without a browser — useful in CI and in any
- *      environment where a canvas can't composite.
+ *   1. The design is reviewable without a browser — useful in CI and anywhere a
+ *      canvas can't composite.
  *   2. It produces `public/cosmos-fallback.webp`, the static background served
  *      to visitors without WebGL2 or with Save-Data on. Generating it from the
- *      real geometry means the fallback can't drift from the live scene the way
- *      a hand-taken screenshot would.
+ *      real geometry means the fallback can't drift from the live scene.
  *
  *   pnpm cosmos:preview
  */
@@ -19,22 +18,29 @@ import path from 'node:path'
 
 import sharp from 'sharp'
 
-import { buildGalaxy, buildStarShell, DEFAULT_GALAXY } from '../src/components/cosmos/galaxy'
+import {
+  buildGalaxy,
+  buildStarShell,
+  DEFAULT_GALAXY,
+  SHAPE_NAMES,
+  type ShapeName,
+} from '../src/components/cosmos/galaxy'
 
-const WIDTH = 1440
-const HEIGHT = 900
+const W = 900
+const H = 640
 /** Exposure. Lower = brighter. */
-const KNEE = 58
+const KNEE = 62
 
 type RGB = [number, number, number]
 
-// Mirrors the palette in engine.ts.
-const CORE_HOT: RGB = [255, 246, 228]
-const GOLD: RGB = [255, 180, 84]
-const COPPER: RGB = [224, 123, 60]
-const EMBER_DEEP: RGB = [143, 63, 20]
-const STAR_WARM: RGB = [255, 230, 194]
-const STAR_PALE: RGB = [246, 227, 203]
+// Mirrors the stellar ramp in engine.ts.
+const CORE_HOT: RGB = [255, 246, 216]
+const YELLOW: RGB = [255, 209, 102]
+const AMBER: RGB = [255, 154, 60]
+const RED: RGB = [255, 94, 77]
+const VIOLET: RGB = [167, 139, 250]
+const BLUE: RGB = [126, 166, 255]
+const ICE: RGB = [191, 212, 255]
 
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v))
 const smoothstep = (e0: number, e1: number, x: number) => {
@@ -47,129 +53,162 @@ const mix = (a: RGB, b: RGB, t: number): RGB => [
   a[2] + (b[2] - a[2]) * t,
 ]
 
-const buffer = new Float32Array(WIDTH * HEIGHT * 3)
-
-function addPoint(px: number, py: number, color: RGB, intensity: number, radius: number) {
-  const r = Math.ceil(radius)
-  for (let dy = -r; dy <= r; dy++) {
-    for (let dx = -r; dx <= r; dx++) {
-      const x = Math.round(px) + dx
-      const y = Math.round(py) + dy
-      if (x < 0 || y < 0 || x >= WIDTH || y >= HEIGHT) continue
-      const dist = Math.hypot(dx, dy)
-      if (dist > radius) continue
-      const weight = smoothstep(radius, 0, dist) * intensity
-      const i = (y * WIDTH + x) * 3
-      buffer[i]! += color[0] * weight
-      buffer[i + 1]! += color[1] * weight
-      buffer[i + 2]! += color[2] * weight
-    }
-  }
+/** The stellar ramp, identical to the fragment shader's. */
+function stellarColor(rank: number): RGB {
+  let c = mix(CORE_HOT, YELLOW, smoothstep(0.0, 0.16, rank))
+  c = mix(c, AMBER, smoothstep(0.16, 0.34, rank))
+  c = mix(c, RED, smoothstep(0.34, 0.52, rank))
+  c = mix(c, VIOLET, smoothstep(0.52, 0.74, rank))
+  c = mix(c, BLUE, smoothstep(0.74, 1.0, rank))
+  return c
 }
 
-/* ── Camera ──────────────────────────────────────────────────────────────────
-   FLIGHT.start in engine.ts: the home view, high above the disc looking down
-   at the core. journey = 0. */
-const CAM_Y = 30
-const CAM_Z = 36
+/* ── Camera — matches FLIGHT.start in engine.ts ──────────────────────────── */
+const CAM_Y = 38
+const CAM_Z = 46
 const FOV = (55 * Math.PI) / 180
-const focal = HEIGHT / 2 / Math.tan(FOV / 2)
-// camera.lookAt(0,0,0) from (0, CAM_Y, CAM_Z) is a pure pitch about X.
+const focal = H / 2 / Math.tan(FOV / 2)
 const PITCH = Math.atan2(CAM_Y, CAM_Z)
 
 function project(x: number, y: number, z: number) {
   const yc = y - CAM_Y
   const zc = z - CAM_Z
-  // Rotate the world by -PITCH about X to bring it into camera space.
   const y2 = yc * Math.cos(PITCH) - zc * Math.sin(PITCH)
   const z2 = yc * Math.sin(PITCH) + zc * Math.cos(PITCH)
   const depth = -z2
   if (depth <= 0.4) return null
-  return { px: WIDTH / 2 + (x * focal) / depth, py: HEIGHT / 2 - (y2 * focal) / depth, depth }
+  return { px: W / 2 + (x * focal) / depth, py: H / 2 - (y2 * focal) / depth, depth }
 }
 
-/* ── Nebula ambience ─────────────────────────────────────────────────────── */
-for (let y = 0; y < HEIGHT; y++) {
-  for (let x = 0; x < WIDTH; x++) {
-    const nx = x / WIDTH
-    const ny = y / HEIGHT
-    // Kept very low: 60% of the frame has to stay unlit void, and ambient haze
-    // is the fastest way to spend that budget without noticing.
-    const a = Math.exp(-(Math.hypot(nx - 0.78, ny - 0.14) ** 2) * 9.0) * 0.075
-    const b = Math.exp(-(Math.hypot(nx - 0.2, ny - 0.85) ** 2) * 8.0) * 0.055
-    const i = (y * WIDTH + x) * 3
-    buffer[i]! += COPPER[0] * a + GOLD[0] * b
-    buffer[i + 1]! += COPPER[1] * a + GOLD[1] * b
-    buffer[i + 2]! += COPPER[2] * a + GOLD[2] * b
-  }
-}
-
-/* ── Starfield ───────────────────────────────────────────────────────────── */
-for (const [count, radius, size] of [
-  [2600, 150, 1.0],
-  [1400, 110, 1.4],
-  [700, 80, 1.8],
-] as const) {
-  const shell = buildStarShell(count, radius)
-  for (let i = 0; i < shell.count; i++) {
-    const p = project(shell.positions[i * 3]!, shell.positions[i * 3 + 1]!, shell.positions[i * 3 + 2]!)
-    if (!p) continue
-    const seed = shell.seed[i]!
-    addPoint(p.px, p.py, mix(STAR_PALE, STAR_WARM, seed), (0.3 + seed * 0.7) * 0.5, size)
-  }
-}
-
-/* ── Galaxy ──────────────────────────────────────────────────────────────── */
 const galaxy = buildGalaxy()
 const OUTER = DEFAULT_GALAXY.radius
 
-for (let i = 0; i < galaxy.count; i++) {
-  const r = galaxy.radius[i]!
-  const a = galaxy.angle[i]!
-  const p = project(Math.cos(a) * r, galaxy.height[i]!, Math.sin(a) * r)
-  if (!p) continue
+function renderShape(shape: ShapeName): Buffer {
+  const buffer = new Float32Array(W * H * 3)
 
-  const radial = clamp01(r / OUTER)
-  const kind = galaxy.kind[i]!
-  const seed = galaxy.seed[i]!
+  const addPoint = (px: number, py: number, color: RGB, intensity: number, radius: number) => {
+    const r = Math.ceil(radius)
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        const x = Math.round(px) + dx
+        const y = Math.round(py) + dy
+        if (x < 0 || y < 0 || x >= W || y >= H) continue
+        const dist = Math.hypot(dx, dy)
+        if (dist > radius) continue
+        const weight = smoothstep(radius, 0, dist) * intensity
+        const i = (y * W + x) * 3
+        buffer[i]! += color[0] * weight
+        buffer[i + 1]! += color[1] * weight
+        buffer[i + 2]! += color[2] * weight
+      }
+    }
+  }
 
-  let color = mix(CORE_HOT, GOLD, smoothstep(0, 0.26, radial))
-  color = mix(color, COPPER, smoothstep(0.26, 0.62, radial))
-  color = mix(color, EMBER_DEEP, smoothstep(0.62, 1, radial))
+  // Ambient nebula. Kept very low: 60% of the frame must stay unlit void, and
+  // haze is the fastest way to spend that budget without noticing.
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const nx = x / W
+      const ny = y / H
+      const a = Math.exp(-(Math.hypot(nx - 0.78, ny - 0.16) ** 2) * 9) * 0.07
+      const b = Math.exp(-(Math.hypot(nx - 0.2, ny - 0.84) ** 2) * 8) * 0.075
+      const i = (y * W + x) * 3
+      buffer[i]! += AMBER[0] * a + VIOLET[0] * b
+      buffer[i + 1]! += AMBER[1] * a + VIOLET[1] * b
+      buffer[i + 2]! += AMBER[2] * a + VIOLET[2] * b
+    }
+  }
 
-  let falloff = 1 + (0.09 - 1) * smoothstep(0, 0.72, radial)
-  if (kind > 1.5) falloff *= 0.35
+  // Starfield.
+  for (const [count, radius, size] of [
+    [2200, 190, 1.0],
+    [1100, 150, 1.3],
+  ] as const) {
+    const shell = buildStarShell(count, radius)
+    for (let i = 0; i < shell.count; i++) {
+      const p = project(
+        shell.positions[i * 3]!,
+        shell.positions[i * 3 + 1]!,
+        shell.positions[i * 3 + 2]!,
+      )
+      if (!p) continue
+      const seed = shell.seed[i]!
+      addPoint(p.px, p.py, mix(ICE, YELLOW, seed), (0.3 + seed * 0.7) * 0.45, size)
+    }
+  }
 
-  const coreness = 1 - smoothstep(0, 0.22, radial)
-  const coreBoost = 1 + coreness * 2.4
-  const size = Math.max(0.65, (1.5 * coreBoost * 30) / p.depth / 9)
+  // The galaxy, in this morphology.
+  const polar = galaxy.shapes[shape]
+  for (let i = 0; i < galaxy.count; i++) {
+    const r = polar[i * 3]!
+    const theta = polar[i * 3 + 1]!
+    const h = polar[i * 3 + 2]!
 
-  addPoint(p.px, p.py, color, falloff * (0.45 + seed * 0.55) * 1.15, size)
-}
+    const p = project(Math.cos(theta) * r, h, Math.sin(theta) * r)
+    if (!p) continue
 
-/* ── Tonemap and write ───────────────────────────────────────────────────── */
-const pixels = Buffer.allocUnsafe(WIDTH * HEIGHT * 3)
-for (let p = 0; p < WIDTH * HEIGHT; p++) {
-  const r = buffer[p * 3]!
-  const g = buffer[p * 3 + 1]!
-  const b = buffer[p * 3 + 2]!
-  // Hue-preserving Reinhard: compress luminance and scale channels by the same
+    const rank = clamp01(galaxy.rank[i]!)
+    const kind = galaxy.kind[i]!
+    const seed = galaxy.seed[i]!
+
+    let falloff = 1 + (0.16 - 1) * smoothstep(0, 0.8, rank)
+    if (kind > 1.5) falloff *= 0.4
+
+    const coreness = 1 - smoothstep(0, 0.22, rank)
+    const size = Math.max(0.62, (1.5 * (1 + coreness * 2.4) * 30) / p.depth / 9)
+
+    addPoint(p.px, p.py, stellarColor(rank), falloff * (0.45 + seed * 0.55) * 1.25, size)
+  }
+
+  // Hue-preserving Reinhard: compress luminance, scale channels by the same
   // factor. Per-channel tonemapping pulls bright pixels toward white, which
-  // bleaches the core's gold into a flat disc.
-  const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b
-  const scale = lum > 0 ? lum / (lum + KNEE) / lum : 0
-  pixels[p * 3] = Math.round(255 * clamp01(r * scale))
-  pixels[p * 3 + 1] = Math.round(255 * clamp01(g * scale))
-  pixels[p * 3 + 2] = Math.round(255 * clamp01(b * scale))
+  // would bleach the whole stellar ramp out of the core.
+  const pixels = Buffer.allocUnsafe(W * H * 3)
+  for (let p = 0; p < W * H; p++) {
+    const r = buffer[p * 3]!
+    const g = buffer[p * 3 + 1]!
+    const b = buffer[p * 3 + 2]!
+    const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b
+    const scale = lum > 0 ? lum / (lum + KNEE) / lum : 0
+    pixels[p * 3] = Math.round(255 * clamp01(r * scale))
+    pixels[p * 3 + 1] = Math.round(255 * clamp01(g * scale))
+    pixels[p * 3 + 2] = Math.round(255 * clamp01(b * scale))
+  }
+  return pixels
 }
 
 const outDir = path.resolve(process.cwd(), 'public')
 await mkdir(outDir, { recursive: true })
 
-const image = sharp(pixels, { raw: { width: WIDTH, height: HEIGHT, channels: 3 } })
-await image.clone().png().toFile(path.join(outDir, 'cosmos-preview.png'))
-await image.clone().webp({ quality: 82 }).toFile(path.join(outDir, 'cosmos-fallback.webp'))
+const tiles: Buffer[] = []
+for (const shape of SHAPE_NAMES) {
+  console.log(`rendering ${shape} …`)
+  const raw = renderShape(shape)
+  tiles.push(
+    await sharp(raw, { raw: { width: W, height: H, channels: 3 } })
+      .png()
+      .toBuffer(),
+  )
 
-console.log(`Rendered ${galaxy.count.toLocaleString()} galaxy particles + starfield`)
-console.log('  public/cosmos-preview.png   (review)')
+  // The first morphology is what a visitor sees before scrolling, so it is the
+  // one that stands in for the live scene when WebGL is unavailable.
+  if (shape === 'spiral') {
+    await sharp(raw, { raw: { width: W, height: H, channels: 3 } })
+      .webp({ quality: 82 })
+      .toFile(path.join(outDir, 'cosmos-fallback.webp'))
+  }
+}
+
+// 2×2 contact sheet.
+await sharp({
+  create: { width: W * 2, height: H * 2, channels: 3, background: { r: 0, g: 0, b: 0 } },
+})
+  .composite(
+    tiles.map((input, i) => ({ input, left: (i % 2) * W, top: Math.floor(i / 2) * H })),
+  )
+  .png()
+  .toFile(path.join(outDir, 'cosmos-preview.png'))
+
+console.log(`\n${galaxy.count.toLocaleString()} particles × ${SHAPE_NAMES.length} morphologies`)
+console.log('  public/cosmos-preview.png   (contact sheet: ' + SHAPE_NAMES.join(' · ') + ')')
 console.log('  public/cosmos-fallback.webp (served when WebGL2 is unavailable)')
