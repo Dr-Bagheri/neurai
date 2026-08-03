@@ -101,7 +101,7 @@ export async function POST(request: Request) {
 
   const system = [
     settings?.persona ??
-      'تو دستیار رسمی شرکت کیهان هستی؛ دقیق، مختصر و بی‌اغراق.',
+      'تو دستیار رسمی شرکت NEURAI هستی؛ دقیق، مختصر و بی‌اغراق.',
     '',
     settings?.groundingRule ??
       'فقط بر پایهٔ «منابع» زیر پاسخ بده. اگر پاسخ در منابع نبود، صریح بگو که نمی‌دانی.',
@@ -135,10 +135,10 @@ export async function POST(request: Request) {
   }))
 
   response.headers.set(
-    'x-kayhan-sources',
+    'x-neurai-sources',
     Buffer.from(JSON.stringify(sources), 'utf8').toString('base64'),
   )
-  response.headers.set('x-kayhan-remaining', String(rate.remaining))
+  response.headers.set('x-neurai-remaining', String(rate.remaining))
 
   return response
 }

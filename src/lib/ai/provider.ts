@@ -17,7 +17,7 @@ const baseURL = process.env.AI_BASE_URL ?? 'http://localhost:8000/v1'
 const modelId = process.env.AI_MODEL ?? 'Qwen/Qwen3-14B-AWQ'
 
 const provider = createOpenAICompatible({
-  name: 'kayhan-llm',
+  name: 'neurai-llm',
   baseURL,
   // vLLM ignores the key, but the SDK requires the header to be present and a
   // hosted endpoint would need a real one.

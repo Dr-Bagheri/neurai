@@ -1,5 +1,5 @@
 # ─────────────────────────────────────────────────────────────────────────────
-#  کیهان — full stack, self-hosted, no external SaaS dependency.
+#  NEURAI — full stack, self-hosted, no external SaaS dependency.
 #
 #  Everyday development (no GPU needed — site + CMS + DB + storage):
 #      docker compose up -d
@@ -11,16 +11,16 @@
 #  without a 24GB card present.
 # ─────────────────────────────────────────────────────────────────────────────
 
-name: kayhan
+name: neurai
 
 services:
   db:
     image: pgvector/pgvector:pg17
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-kayhan}
+      POSTGRES_USER: ${POSTGRES_USER:-neurai}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
-      POSTGRES_DB: ${POSTGRES_DB:-kayhan}
+      POSTGRES_DB: ${POSTGRES_DB:-neurai}
       # Persian-aware collation via ICU, which ships with Postgres 17. A glibc
       # `LANG=fa_IR.utf8` fails here — the Debian base image carries no Persian
       # locale, and initdb aborts. ICU needs no system locale and sorts Persian
@@ -32,7 +32,7 @@ services:
       - db_data:/var/lib/postgresql/data
       - ./docker/initdb:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-kayhan} -d ${POSTGRES_DB:-kayhan}']
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-neurai} -d ${POSTGRES_DB:-neurai}']
       interval: 5s
       timeout: 5s
       retries: 20
@@ -63,7 +63,7 @@ services:
       storage:
         condition: service_healthy
     environment:
-      S3_BUCKET: ${S3_BUCKET:-kayhan-media}
+      S3_BUCKET: ${S3_BUCKET:-neurai-media}
       S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-minioadmin}
       S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
     entrypoint: >
@@ -89,7 +89,7 @@ services:
     environment:
       # Inside the compose network, services resolve by name — override the
       # localhost defaults from .env.
-      DATABASE_URI: postgres://${POSTGRES_USER:-kayhan}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-kayhan}
+      DATABASE_URI: postgres://${POSTGRES_USER:-neurai}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-neurai}
       S3_ENDPOINT: http://storage:9000
       AI_BASE_URL: ${AI_BASE_URL:-http://llm:8000/v1}
       EMBEDDINGS_BASE_URL: ${EMBEDDINGS_BASE_URL:-http://embeddings:8080}

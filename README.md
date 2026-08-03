@@ -1,6 +1,6 @@
 <div align="right">
 
-# کیهان — وب‌سایت شرکت هوش مصنوعی
+# NEURAI — وب‌سایت شرکت هوش مصنوعی
 
 وب‌سایتی پویا، فارسی و کاملاً راست‌به‌چپ، با دستیار هوشمند متن‌باز که **تماماً روی زیرساخت
 خودتان** اجرا می‌شود. هیچ سرویس ابری خارجی، هیچ کلید API، و هیچ وابستگی‌ای که تحریم بتواند
@@ -10,8 +10,8 @@
 
 ---
 
-> **⚠️ نام تجاری موقت است.** «کیهان / Kayhan AI» یک نام جایگزین است که با فضای طراحی
-> هم‌خوانی دارد (کیهان = cosmos). برای تغییر، فقط [`src/config/brand.ts`](src/config/brand.ts)
+> **⚠️ نام تجاری موقت است.** «NEURAI / NEURAI» یک نام جایگزین است که با فضای طراحی
+> هم‌خوانی دارد (NEURAI = cosmos). برای تغییر، فقط [`src/config/brand.ts`](src/config/brand.ts)
 > را ویرایش کنید؛ هیچ جای دیگری نام شرکت را hardcode نکرده است.
 
 ## Overview
@@ -34,7 +34,7 @@ outbound internet dependency.
 
 ## What makes it different
 
-### کیهان — a persistent, interactive cosmos
+### NEURAI — a persistent, interactive cosmos
 
 The background is a single WebGL2 scene mounted **once** in the root layout,
 outside the page slot. Navigating never rebuilds the context: routes retarget

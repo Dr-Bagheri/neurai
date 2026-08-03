@@ -3,7 +3,7 @@ import { getPayloadClient } from '@/lib/payload'
 import { ChatWidget } from './ChatWidget'
 
 const DEFAULT_GREETING =
-  'سلام! من دستیار کیهان هستم. دربارهٔ خدمات، معماری فنی یا نوشته‌های ما بپرسید.'
+  'سلام! من دستیار NEURAI هستم. دربارهٔ خدمات، معماری فنی یا نوشته‌های ما بپرسید.'
 
 const DEFAULT_SUGGESTIONS = [
   'چه خدماتی ارائه می‌دهید؟',

@@ -15,7 +15,7 @@ import { Pool } from 'pg'
  */
 
 declare global {
-  var __kayhanPool: Pool | undefined
+  var __neuraiPool: Pool | undefined
 }
 
 function createPool() {
@@ -32,10 +32,10 @@ function createPool() {
   })
 }
 
-export const pool: Pool = globalThis.__kayhanPool ?? createPool()
+export const pool: Pool = globalThis.__neuraiPool ?? createPool()
 
 if (process.env.NODE_ENV !== 'production') {
-  globalThis.__kayhanPool = pool
+  globalThis.__neuraiPool = pool
 }
 
 /** pgvector's text input format: `[0.1,0.2,...]`. */

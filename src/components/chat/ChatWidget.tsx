@@ -80,7 +80,7 @@ export function ChatWidget({ greeting, suggestions }: { greeting: string; sugges
         return
       }
 
-      const header = response.headers.get('x-kayhan-sources')
+      const header = response.headers.get('x-neurai-sources')
       if (header) {
         try {
           setSources(JSON.parse(new TextDecoder().decode(base64ToBytes(header))) as Source[])
@@ -140,7 +140,7 @@ export function ChatWidget({ greeting, suggestions }: { greeting: string; sugges
           className="fixed bottom-24 start-6 z-50 flex h-[min(34rem,calc(100dvh-8rem))] w-[min(24rem,calc(100vw-3rem))] flex-col overflow-hidden rounded-2xl border border-hairline bg-void-950/92 backdrop-blur-2xl"
         >
           <header className="border-b border-hairline px-5 py-4">
-            <p className="text-sm text-text-100">دستیار کیهان</p>
+            <p className="text-sm text-text-100">دستیار NEURAI</p>
             <p className="mt-0.5 text-xs text-text-400">پاسخ‌ها بر پایهٔ محتوای همین سایت است</p>
           </header>
 

@@ -29,7 +29,7 @@ export const AIAssistant: GlobalConfig = {
       type: 'textarea',
       required: true,
       defaultValue:
-        'سلام! من دستیار کیهان هستم. دربارهٔ خدمات، معماری فنی یا نوشته‌های ما بپرسید.',
+        'سلام! من دستیار NEURAI هستم. دربارهٔ خدمات، معماری فنی یا نوشته‌های ما بپرسید.',
       label: { fa: 'پیام خوش‌آمد', en: 'Greeting' },
     },
     {
@@ -37,7 +37,7 @@ export const AIAssistant: GlobalConfig = {
       type: 'textarea',
       required: true,
       defaultValue:
-        'تو دستیار رسمی شرکت کیهان هستی؛ دقیق، مختصر و بی‌اغراق. لحن حرفه‌ای و محترمانه اما ساده است.',
+        'تو دستیار رسمی شرکت NEURAI هستی؛ دقیق، مختصر و بی‌اغراق. لحن حرفه‌ای و محترمانه اما ساده است.',
       label: { fa: 'شخصیت', en: 'Persona' },
       admin: {
         description: {

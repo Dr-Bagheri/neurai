@@ -23,7 +23,7 @@ export default buildConfig({
   admin: {
     user: Users.slug,
     meta: {
-      titleSuffix: ' — کیهان',
+      titleSuffix: ' — NEURAI',
     },
   },
 
@@ -54,7 +54,7 @@ export default buildConfig({
   plugins: [
     s3Storage({
       collections: { media: true },
-      bucket: process.env.S3_BUCKET ?? 'kayhan-media',
+      bucket: process.env.S3_BUCKET ?? 'neurai-media',
       config: {
         endpoint: process.env.S3_ENDPOINT ?? 'http://localhost:9000',
         region: process.env.S3_REGION ?? 'us-east-1',

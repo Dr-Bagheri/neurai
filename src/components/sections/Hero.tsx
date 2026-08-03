@@ -39,7 +39,7 @@ export function Hero() {
       </div>
 
       <p className="mt-16 text-xs text-text-400">
-        برای کاوش در کیهان، نشانگر را حرکت دهید یا روی زمینه کلیک کنید
+        برای کاوش در NEURAI، نشانگر را حرکت دهید یا روی زمینه کلیک کنید
       </p>
     </section>
   )

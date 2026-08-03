@@ -5,8 +5,8 @@ import { usePathname } from 'next/navigation'
 import { Menu, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
+import { BrandName } from '@/components/ui/BrandName'
 import { ButtonLink } from '@/components/ui/Button'
-import { brand } from '@/config/brand'
 import { cn } from '@/lib/utils'
 
 const NAV = [
@@ -44,7 +44,7 @@ export function SiteHeader() {
           className="flex items-center gap-3 text-lg text-text-100 transition-colors hover:text-white"
         >
           <GirihMark />
-          <span className="font-display font-medium tracking-tight">{brand.nameFa}</span>
+          <BrandName variant="mark" className="text-base" />
         </Link>
 
         <nav aria-label="ناوبری اصلی" className="hidden items-center gap-1 md:flex">

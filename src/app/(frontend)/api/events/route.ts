@@ -10,7 +10,7 @@ import { getPayloadClient } from '@/lib/payload'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-const ANON_COOKIE = 'kayhan_anon'
+const ANON_COOKIE = 'neurai_anon'
 
 const bodySchema = z.object({
   type: z.enum(['post_read', 'chat_topic', 'cta_click']),
