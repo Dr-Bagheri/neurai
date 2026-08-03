@@ -1,0 +1,184 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  کیهان — full stack, self-hosted, no external SaaS dependency.
+#
+#  Everyday development (no GPU needed — site + CMS + DB + storage):
+#      docker compose up -d
+#
+#  With the AI services (requires an NVIDIA GPU + container toolkit):
+#      docker compose --profile ai up -d
+#
+#  The `ai` profile is opt-in precisely so a laptop can run the whole site
+#  without a 24GB card present.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: kayhan
+
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-kayhan}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-kayhan}
+      # Persian-aware collation for correct ORDER BY on Persian titles.
+      LANG: fa_IR.utf8
+    ports:
+      - '5432:5432'
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./docker/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-kayhan} -d ${POSTGRES_DB:-kayhan}']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  storage:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:?S3_SECRET_ACCESS_KEY is required}
+    ports:
+      - '9000:9000' # S3 API
+      - '9001:9001' # web console
+    volumes:
+      - storage_data:/data
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  # One-shot: creates the media bucket and makes it publicly readable so
+  # Next/Image can fetch originals without signing every URL.
+  storage-init:
+    image: minio/mc:latest
+    depends_on:
+      storage:
+        condition: service_healthy
+    environment:
+      S3_BUCKET: ${S3_BUCKET:-kayhan-media}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-minioadmin}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://storage:9000 $$S3_ACCESS_KEY_ID $$S3_SECRET_ACCESS_KEY &&
+      mc mb --ignore-existing local/$$S3_BUCKET &&
+      mc anonymous set download local/$$S3_BUCKET &&
+      echo 'bucket ready'
+      "
+    restart: 'no'
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      storage:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      # Inside the compose network, services resolve by name — override the
+      # localhost defaults from .env.
+      DATABASE_URI: postgres://${POSTGRES_USER:-kayhan}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-kayhan}
+      S3_ENDPOINT: http://storage:9000
+      AI_BASE_URL: ${AI_BASE_URL:-http://llm:8000/v1}
+      EMBEDDINGS_BASE_URL: ${EMBEDDINGS_BASE_URL:-http://embeddings:8080}
+    ports:
+      - '3000:3000'
+    healthcheck:
+      test: ['CMD', 'node', '-e', "fetch('http://localhost:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  # ── AI profile ────────────────────────────────────────────────────────────
+
+  llm:
+    profiles: ['ai']
+    image: vllm/vllm-openai:latest
+    restart: unless-stopped
+    # Qwen3-14B-AWQ fits comfortably in 24GB with room for KV cache.
+    # Swap AI_MODEL and this arg together if you move to Qwen3-30B-A3B.
+    command:
+      - --model=${AI_MODEL:-Qwen/Qwen3-14B-AWQ}
+      - --served-model-name=${AI_MODEL:-Qwen/Qwen3-14B-AWQ}
+      - --max-model-len=16384
+      - --gpu-memory-utilization=0.86
+      - --enable-prefix-caching
+    environment:
+      HUGGING_FACE_HUB_TOKEN: ${HUGGING_FACE_HUB_TOKEN:-}
+    volumes:
+      - ./models:/root/.cache/huggingface
+    ports:
+      - '8000:8000'
+    ipc: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ['CMD-SHELL', 'python3 -c "import urllib.request;urllib.request.urlopen(\"http://localhost:8000/health\")"']
+      interval: 30s
+      timeout: 10s
+      retries: 20
+      start_period: 300s
+
+  embeddings:
+    profiles: ['ai']
+    build:
+      context: ./services/embeddings
+    restart: unless-stopped
+    environment:
+      EMBEDDINGS_MODEL: ${EMBEDDINGS_MODEL:-MCINext/Hakim}
+      HF_HOME: /models
+    volumes:
+      - ./models:/models
+    ports:
+      - '8080:8080'
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ['CMD', 'python', '-c', "import urllib.request;urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 20s
+      timeout: 10s
+      retries: 20
+      start_period: 120s
+
+  # ── Edge ──────────────────────────────────────────────────────────────────
+
+  caddy:
+    profiles: ['edge']
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on: [web]
+    environment:
+      SITE_DOMAIN: ${SITE_DOMAIN:-localhost}
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  db_data:
+  storage_data:
+  caddy_data:
+  caddy_config:

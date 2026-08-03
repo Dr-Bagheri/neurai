@@ -1,0 +1,47 @@
+# dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# next
+.next/
+out/
+build/
+next-env.d.ts
+
+# production
+dist/
+
+# env — NEVER commit real secrets
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# payload
+/src/app/(payload)/admin/importMap.js
+media/
+
+# docker volumes
+data/
+volumes/
+
+# model weights (huge — pulled at deploy time)
+models/
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# os / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# misc
+*.tsbuildinfo
+.eslintcache
+coverage/

@@ -1,0 +1,372 @@
+@import 'tailwindcss';
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   کیهان — Design tokens: «از آتش تا فیروزه» (Ember → Firouzeh)
+
+   Colour is budgeted 60 : 30 : 10.
+     60%  void      — the unlit majority. Near-black. Most of the page.
+     30%  structure — glass, hairlines, text. Desaturated.
+     10%  signal    — ember + firouzeh. The only saturated pixels on screen.
+
+   `pnpm check:ratio` measures rendered pages against this budget and fails CI
+   if it drifts. Please don't add saturated colours outside the signal ramp.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@theme {
+  /* ── 60% · Void ────────────────────────────────────────────────────────── */
+  --color-void-1000: #000000;
+  --color-void-950: #050408;
+  --color-void-900: #0a0810;
+  --color-void-800: #12101a;
+
+  /* ── 30% · Structure ───────────────────────────────────────────────────── */
+  --color-glass-1: oklch(1 0 0 / 3.5%);
+  --color-glass-2: oklch(1 0 0 / 5.5%);
+  --color-glass-3: oklch(1 0 0 / 9%);
+  --color-hairline: oklch(1 0 0 / 8%);
+  --color-hairline-strong: oklch(1 0 0 / 14%);
+  --color-text-100: #e9e4dc; /* warm off-white — primary text */
+  --color-text-200: #c4bfc6;
+  --color-text-300: #9a94a0; /* muted — secondary text, the "dimmed" half of two-tone headings */
+  --color-text-400: #6b6672;
+  --color-graphite-700: #333134;
+
+  /* ── 10% · Signal ──────────────────────────────────────────────────────── */
+  /* Ember — ambient lighting only. Never text, fill, or border. */
+  --color-ember-700: #7a3226;
+  --color-ember-600: #a54735;
+  --color-ember-400: #e8874f;
+  --color-ember-100: #eed7b3;
+  /* Firouzeh — the cool pole, and the single interactive accent. */
+  --color-lapis-900: #0d1430;
+  --color-lapis-700: #1c2c58;
+  --color-lapis-400: #3556a0;
+  --color-cyan-300: #9adaed;
+  --color-accent: #6fd3e8; /* links, focus rings, primary CTA, chat send */
+  --color-accent-dim: #3d8fa3;
+
+  /* ── Type ──────────────────────────────────────────────────────────────────
+     One Persian family across the whole site, separated by weight rather than
+     by face — display sits at 200–300, body at 400. This mirrors the reference
+     direction (which uses a single family throughout) and halves the font
+     payload, which matters on Iranian mobile connections. */
+  --font-display: 'Vazirmatn Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-sans: 'Vazirmatn Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-latin: 'Onest Variable', 'Vazirmatn Variable', ui-sans-serif, system-ui, sans-serif;
+
+  /* Persian text needs more line-height than Latin — ascenders/descenders and
+     diacritics collide at Latin defaults. */
+  --leading-fa-tight: 1.45;
+  --leading-fa-normal: 1.85;
+  --leading-fa-loose: 2.1;
+
+  /* ── Motion ────────────────────────────────────────────────────────────── */
+  --ease-cinematic: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out-soft: cubic-bezier(0.33, 1, 0.68, 1);
+}
+
+/* Fonts are self-hosted via the @fontsource-variable packages, imported in
+   src/app/layout.tsx. Nothing is fetched from Google Fonts or any other CDN:
+   the woff2 files ship from our own origin under /_next/static, which is both
+   a privacy win and a hard requirement for a host inside Iran. */
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Base
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@layer base {
+  :root {
+    /* Scroll progress through the page, 0 → 1. Written by the journey driver
+       (src/components/cosmos/journey.ts) and read by every ambient bloom so
+       the whole site is one continuously-lit environment rather than a stack
+       of independently-styled sections. */
+    --journey: 0;
+
+    /* Pointer position in viewport-normalised units, for parallax. */
+    --pointer-x: 0.5;
+    --pointer-y: 0.5;
+
+    color-scheme: dark;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    /* The cosmos canvas is fixed behind everything; the page itself is
+       transparent so the canvas shows through every route. */
+    background-color: var(--color-void-1000);
+  }
+
+  body {
+    background-color: transparent;
+    color: var(--color-text-100);
+    font-family: var(--font-sans);
+    line-height: var(--leading-fa-normal);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    overflow-x: hidden;
+  }
+
+  /* Persian typography wants slightly looser tracking at display sizes and
+     tighter leading — the opposite of Latin. */
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
+    line-height: var(--leading-fa-tight);
+    font-weight: 300; /* light — the reference direction leans on thin display type */
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  /* Latin runs and numerals inside Persian text keep their own face and
+     direction. Applied via <bdi class="latin"> in components. */
+  .latin {
+    font-family: var(--font-latin);
+    font-feature-settings: 'tnum' 1;
+    direction: ltr;
+    unicode-bidi: isolate;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 3px;
+    border-radius: 2px;
+  }
+
+  ::selection {
+    background: var(--color-accent);
+    color: var(--color-void-1000);
+  }
+
+  /* Direction-implying icons flip with the document. Chevrons and arrows point
+     the wrong way in RTL otherwise. */
+  [dir='rtl'] .flip-rtl {
+    transform: scaleX(-1);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Utilities
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@utility glass-panel {
+  background-color: var(--color-glass-1);
+  border: 1px solid var(--color-hairline);
+  backdrop-filter: blur(20px) saturate(1.2);
+  /* Elevation from layered inset hairlines, never drop shadows — shadows read
+     as "card on paper", inset light reads as "surface in space". */
+  box-shadow:
+    inset 0 1px 0 0 oklch(1 0 0 / 6%),
+    inset 0 -1px 0 0 oklch(0 0 0 / 20%);
+}
+
+/* The two-tone heading treatment: the sentence opens bright and its trailing
+   clause recedes. In Persian the verb lands last, so the dimmed tail carries
+   the resolution of the sentence — it reads as cadence, not as a fade-out. */
+@utility heading-tail {
+  color: var(--color-text-300);
+}
+
+/* Ambient bloom anchored off-canvas. Hue migrates ember → firouzeh with
+   --journey, so scrolling moves you through the lit environment. */
+@utility bloom-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: -1;
+  background:
+    radial-gradient(
+      60% 50% at calc(80% - var(--pointer-x) * 4%) 0%,
+      color-mix(in oklab, var(--color-ember-600) calc(18% * (1 - var(--journey))), transparent)
+        0%,
+      transparent 70%
+    ),
+    radial-gradient(
+      70% 60% at calc(15% + var(--pointer-x) * 4%) 100%,
+      color-mix(in oklab, var(--color-lapis-400) calc(20% * var(--journey)), transparent) 0%,
+      transparent 72%
+    );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Long-form Persian prose.
+   Written by hand rather than pulled from a typography plugin: the defaults in
+   those plugins are tuned for Latin measure and leading, both of which are
+   wrong for Persian. Persian needs looser line-height (diacritics and
+   descenders collide) and a slightly narrower measure.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.prose-fa {
+  font-size: 1.0625rem;
+  line-height: var(--leading-fa-loose);
+  color: var(--color-text-200);
+}
+
+.prose-fa > * + * {
+  margin-block-start: 1.5em;
+}
+
+.prose-fa h2,
+.prose-fa h3,
+.prose-fa h4 {
+  color: var(--color-text-100);
+  font-family: var(--font-display);
+  line-height: var(--leading-fa-tight);
+  margin-block-start: 2.5em;
+  margin-block-end: 0.8em;
+}
+
+.prose-fa h2 {
+  font-size: 1.75rem;
+  font-weight: 300;
+}
+
+.prose-fa h3 {
+  font-size: 1.35rem;
+  font-weight: 400;
+}
+
+.prose-fa a {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-underline-offset: 0.25em;
+  text-decoration-thickness: 1px;
+  transition: opacity 200ms;
+}
+
+.prose-fa a:hover {
+  opacity: 0.75;
+}
+
+.prose-fa strong {
+  color: var(--color-text-100);
+  font-weight: 600;
+}
+
+.prose-fa ul,
+.prose-fa ol {
+  padding-inline-start: 1.5em;
+}
+
+.prose-fa ul {
+  list-style: disc;
+}
+
+.prose-fa ol {
+  list-style: decimal;
+}
+
+.prose-fa li::marker {
+  color: var(--color-accent-dim);
+}
+
+.prose-fa li + li {
+  margin-block-start: 0.6em;
+}
+
+.prose-fa blockquote {
+  border-inline-start: 2px solid var(--color-accent-dim);
+  padding-inline-start: 1.25em;
+  color: var(--color-text-300);
+  font-style: normal; /* Persian faces have no true italic — faux italic looks broken */
+}
+
+/* Code is Latin and LTR even inside RTL prose. */
+.prose-fa code,
+.prose-fa pre {
+  direction: ltr;
+  unicode-bidi: isolate;
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  text-align: left;
+}
+
+.prose-fa code {
+  font-size: 0.875em;
+  background: var(--color-glass-2);
+  border: 1px solid var(--color-hairline);
+  border-radius: 0.375rem;
+  padding: 0.15em 0.4em;
+}
+
+.prose-fa pre {
+  background: var(--color-glass-1);
+  border: 1px solid var(--color-hairline);
+  border-radius: 0.75rem;
+  padding: 1.25rem;
+  overflow-x: auto;
+}
+
+.prose-fa pre code {
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+.prose-fa img {
+  border-radius: 0.75rem;
+  border: 1px solid var(--color-hairline);
+}
+
+.prose-fa hr {
+  border-color: var(--color-hairline);
+}
+
+/* The cosmos base layer. Pure CSS, always painted, sitting under the WebGL
+   canvas. It gives the page depth on the very first frame — before Three.js
+   has even been fetched — and it is the entire background for visitors without
+   WebGL2 or with Save-Data on. The page must look finished with only this. */
+.cosmos-fallback {
+  background:
+    /* warm source, upper-end of the page */
+    radial-gradient(
+      52% 42% at calc(78% - (var(--pointer-x) - 0.5) * 3%) calc(6% + var(--journey) * -6%),
+      color-mix(in oklab, #e8874f calc(22% * (1 - var(--journey))), transparent) 0%,
+      transparent 68%
+    ),
+    /* cool source, lower-start of the page */
+    radial-gradient(
+      58% 48% at calc(18% + (var(--pointer-x) - 0.5) * 3%) calc(88% - var(--journey) * 10%),
+      color-mix(in oklab, #3556a0 calc(26% * (0.35 + var(--journey))), transparent) 0%,
+      transparent 70%
+    ),
+    /* deep field */
+    radial-gradient(120% 90% at 50% 40%, #0a0810 0%, #000000 78%);
+  transition: background 600ms var(--ease-cinematic);
+}
+
+/* A faint static starfield, drawn with layered radial gradients so it costs no
+   requests and no JavaScript. Only shown when WebGL is not driving the scene —
+   otherwise the real starfield would double up with it. */
+[data-cosmos='static'] .cosmos-fallback::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(1px 1px at 12% 22%, #e9e4dc 50%, transparent 50%),
+    radial-gradient(1px 1px at 78% 14%, #bcd6e8 50%, transparent 50%),
+    radial-gradient(1px 1px at 34% 68%, #f0dcc4 50%, transparent 50%),
+    radial-gradient(1px 1px at 62% 82%, #9adaed 50%, transparent 50%),
+    radial-gradient(1px 1px at 88% 54%, #e9e4dc 50%, transparent 50%),
+    radial-gradient(1px 1px at 22% 88%, #bcd6e8 50%, transparent 50%);
+  background-size: 340px 340px;
+  background-repeat: repeat;
+  opacity: 0.5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -1,0 +1,10 @@
+# pnpm 10+ reads settings from here rather than the `pnpm` field in package.json.
+#
+# Each of these has a legitimate postinstall build step:
+#   sharp         — native libvips bindings for image processing (Next/Image, OG images)
+#   esbuild       — fetches its platform-specific binary
+#   unrs-resolver — native module resolver used by eslint-config-next
+allowBuilds:
+  esbuild: true
+  sharp: true
+  unrs-resolver: true
