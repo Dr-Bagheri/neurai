@@ -177,6 +177,71 @@ export function buildGirihTorus(options: Partial<GirihOptions> = {}): GirihPoint
 }
 
 /**
+ * Alternative target positions for the same particles.
+ *
+ * The cosmos has three formations — ring, column, terrain — and scrolling
+ * morphs between them. Rather than three separate particle systems that
+ * cross-fade (which reads as one thing disappearing and another appearing),
+ * every formation is a *destination* for the same points, blended in the vertex
+ * shader. The ring genuinely unravels into the column and the column collapses
+ * into the landscape, which is what makes the journey feel continuous.
+ *
+ * Each point keeps its identity across formations: its position in one is
+ * derived from the same (ringAngle, tubeAngle, seed) triple as in the others,
+ * so neighbours stay neighbours and the morph reads as flow, not as noise.
+ */
+export function buildFormations(cloud: GirihPointCloud) {
+  const { count, ringAngle, tubeAngle, seed } = cloud
+
+  const column = new Float32Array(count * 3)
+  const terrain = new Float32Array(count * 3)
+
+  const COLUMN_HEIGHT = 13
+  const COLUMN_RADIUS = 1.5
+  const TERRAIN_WIDTH = 26
+  const TERRAIN_DEPTH = 20
+
+  for (let i = 0; i < count; i++) {
+    const u = ringAngle[i]!
+    const v = tubeAngle[i]!
+    const s = seed[i]!
+
+    // ── Column ──────────────────────────────────────────────────────────────
+    // A rising pillar. Height comes from the seed so points distribute along it
+    // evenly; the angle is inherited from the ring so the lattice appears to
+    // stretch vertically rather than scatter.
+    const columnY = (s - 0.5) * COLUMN_HEIGHT
+    // Waist: narrower at top and bottom, fullest in the middle, matching the
+    // reference's plume silhouette.
+    const waist = 1 - Math.abs(columnY / (COLUMN_HEIGHT * 0.5)) ** 2 * 0.55
+    const columnAngle = u * Math.PI * 2 + v * 1.4
+    const columnRadius = COLUMN_RADIUS * waist * (0.45 + v * 0.9)
+
+    column[i * 3 + 0] = Math.cos(columnAngle) * columnRadius
+    column[i * 3 + 1] = columnY
+    column[i * 3 + 2] = Math.sin(columnAngle) * columnRadius
+
+    // ── Terrain ─────────────────────────────────────────────────────────────
+    // A wave landscape sitting below the camera and receding to the horizon.
+    // Height is a sum of two incommensurable sine waves, which gives rolling
+    // dunes without the visible tiling a single frequency produces.
+    const tx = (u - 0.5) * TERRAIN_WIDTH
+    const tz = (s - 0.5) * TERRAIN_DEPTH
+    const ty =
+      -3.6 +
+      Math.sin(tx * 0.42 + tz * 0.21) * 0.5 +
+      Math.sin(tx * 0.17 - tz * 0.33) * 0.75 +
+      (v - 0.5) * 0.25
+
+    terrain[i * 3 + 0] = tx
+    terrain[i * 3 + 1] = ty
+    terrain[i * 3 + 2] = tz
+  }
+
+  return { column, terrain }
+}
+
+/**
  * A spherical shell of stars around the camera. Points are distributed by the
  * Fibonacci sphere method rather than by rejection sampling so the density is
  * genuinely even — random spherical coordinates clump badly at the poles, and

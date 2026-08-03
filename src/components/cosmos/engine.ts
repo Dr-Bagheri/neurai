@@ -18,7 +18,7 @@
 
 import * as THREE from 'three'
 
-import { buildGirihTorus, buildStarShell } from './girih'
+import { buildFormations, buildGirihTorus, buildStarShell } from './girih'
 import type { CosmosBudget } from './tier'
 
 export type SceneName = 'home' | 'inner' | 'reading'
@@ -96,9 +96,13 @@ const GIRIH_VERTEX = /* glsl */ `
   attribute float aSeed;
   attribute float aRingAngle;
   attribute float aTubeAngle;
+  attribute vec3  aColumn;
+  attribute vec3  aTerrain;
 
   uniform float uTime;
   uniform float uTurbulence;
+  // Formation weights, summing to 1: ring / column / terrain.
+  uniform vec3  uFormation;
   uniform float uJourney;
   uniform float uDisperse;
   uniform float uPixelRatio;
@@ -129,7 +133,15 @@ const GIRIH_VERTEX = /* glsl */ `
   }
 
   void main() {
-    vec3 pos = position;
+    // Blend the three formations. Every point has a destination in each, all
+    // derived from the same (ringAngle, tubeAngle, seed) triple, so neighbours
+    // stay neighbours and the morph reads as the ring *becoming* the column
+    // rather than one shape fading into another.
+    vec3 pos = position * uFormation.x + aColumn * uFormation.y + aTerrain * uFormation.z;
+
+    // Turbulence follows the ring while the ring is what we are looking at, and
+    // relaxes as the formation flattens — a landscape shouldn't boil.
+    float turbAmount = uTurbulence * (uFormation.x + uFormation.y * 0.55 + uFormation.z * 0.3);
 
     // Direction from the tube's centreline outward — displacing along this
     // thickens and feathers the ring instead of just jittering points in place.
@@ -148,10 +160,10 @@ const GIRIH_VERTEX = /* glsl */ `
     float turbulence = fbm3(field) - 0.5;
     float swirl = fbm3(field + vec3(11.3, 7.1, 3.7)) - 0.5;
 
-    pos += outward * turbulence * uTurbulence * (0.55 + edge * 1.45);
+    pos += outward * turbulence * turbAmount * (0.55 + edge * 1.45);
     // A tangential component stops the displacement reading as purely radial.
-    pos += vec3(-pos.y, pos.x, 0.0) * 0.08 * swirl * uTurbulence;
-    pos.z += swirl * uTurbulence * 0.5;
+    pos += vec3(-pos.y, pos.x, 0.0) * 0.08 * swirl * turbAmount;
+    pos.z += swirl * turbAmount * 0.5;
 
     // Dispersion: on inner routes the ring loosens into a drifting field, so
     // navigating reads as travelling outward rather than as a scene swap.
@@ -198,7 +210,10 @@ const GIRIH_FRAGMENT = /* glsl */ `
   uniform vec3  uCyan;
   uniform float uJourney;
   uniform float uOpacity;
-  uniform float uRingHalfHeight;
+  // Axis and extent the colour ramp is measured along. Both change with the
+  // formation: the ring reads diagonally, the terrain left-to-right.
+  uniform vec2  uColorAxis;
+  uniform float uColorScale;
 
   varying float vSeed;
   varying float vHeight;
@@ -213,13 +228,12 @@ const GIRIH_FRAGMENT = /* glsl */ `
     if (d > 0.5) discard;
     float alpha = smoothstep(0.5, 0.02, d);
 
-    // Hue is a function of where the point sits on the ring, not of time, so
-    // the plasma flows *through* a gradient that stays anchored in space.
-    // The axis is diagonal — ember toward the upper-right, firouzeh toward the
-    // lower-left — which is what gives the reference composition its tilt
-    // instead of a flat top/bottom split.
-    vec2 axis = normalize(vec2(0.42, 1.0));
-    float t = clamp(dot(vRingXY, axis) / uRingHalfHeight * 0.5 + 0.5, 0.0, 1.0);
+    // Hue is a function of where the point sits in space, not of time, so the
+    // plasma flows *through* a gradient that stays anchored. The axis rotates
+    // with the formation: diagonal for the ring (ember upper-right, firouzeh
+    // lower-left, giving the reference its tilt) and horizontal for the
+    // terrain, where the reference runs firouzeh-left to ember-right.
+    float t = clamp(dot(vRingXY, normalize(uColorAxis)) / uColorScale * 0.5 + 0.5, 0.0, 1.0);
 
     vec3 warm = mix(uEmber, uEmberHot, smoothstep(0.62, 1.0, t));
     vec3 cool = mix(uLapis, uCyan, smoothstep(0.42, 0.0, t));
@@ -341,6 +355,28 @@ const NEBULA_FRAGMENT = /* glsl */ `
   }
 `
 
+/**
+ * Where each formation owns the scroll, and where it hands over.
+ *
+ * Plateaus matter as much as transitions: a formation needs a stretch where it
+ * is simply itself and the reader can look at it, otherwise the page reads as
+ * one continuous unresolved morph. The gaps between these ranges are the
+ * cross-fades.
+ */
+const FORMATION_SCHEDULE = {
+  ringUntil: 0.26,
+  columnFrom: 0.42,
+  columnUntil: 0.6,
+  terrainFrom: 0.78,
+} as const
+
+/** Colour ramp axis and extent per formation, blended alongside the positions. */
+const COLOR_AXIS = {
+  ring: { axis: [0.42, 1] as const, scale: 4.28 },
+  column: { axis: [0.15, 1] as const, scale: 7.0 },
+  terrain: { axis: [1, 0.12] as const, scale: 13.0 },
+} as const
+
 const SCENE_STATE: Record<SceneName, { disperse: number; cameraZ: number; ringOpacity: number }> = {
   // Home: the ring is the subject, framed whole with a little breathing room.
   home: { disperse: 0, cameraZ: 8.7, ringOpacity: 1 },
@@ -353,6 +389,31 @@ const SCENE_STATE: Record<SceneName, { disperse: number; cameraZ: number; ringOp
 /** Frame-rate-independent easing toward a target. */
 function damp(current: number, target: number, lambda: number, dt: number): number {
   return current + (target - current) * (1 - Math.exp(-lambda * dt))
+}
+
+const smoothstep = (edge0: number, edge1: number, x: number) => {
+  const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)))
+  return t * t * (3 - 2 * t)
+}
+
+/**
+ * Scroll progress → the three formation weights.
+ *
+ * Returns weights that always sum to 1, so the vertex shader's blend is a true
+ * interpolation and points never drift toward the origin mid-transition (which
+ * is what happens if the weights are allowed to under-sum).
+ */
+function formationWeights(journey: number): [number, number, number] {
+  const { ringUntil, columnFrom, columnUntil, terrainFrom } = FORMATION_SCHEDULE
+
+  const toColumn = smoothstep(ringUntil, columnFrom, journey)
+  const toTerrain = smoothstep(columnUntil, terrainFrom, journey)
+
+  const ring = 1 - toColumn
+  const column = toColumn * (1 - toTerrain)
+  const terrain = toColumn * toTerrain
+
+  return [ring, column, terrain]
 }
 
 export class CosmosEngine {
@@ -426,12 +487,15 @@ export class CosmosEngine {
   private buildRing() {
     const { cellsU, cellsV, pointsPerSegment } = this.budget.girihCells
     const cloud = buildGirihTorus({ cellsU, cellsV, pointsPerSegment })
+    const { column, terrain } = buildFormations(cloud)
 
     const geometry = new THREE.BufferGeometry()
     geometry.setAttribute('position', new THREE.BufferAttribute(cloud.positions, 3))
     geometry.setAttribute('aSeed', new THREE.BufferAttribute(cloud.seed, 1))
     geometry.setAttribute('aRingAngle', new THREE.BufferAttribute(cloud.ringAngle, 1))
     geometry.setAttribute('aTubeAngle', new THREE.BufferAttribute(cloud.tubeAngle, 1))
+    geometry.setAttribute('aColumn', new THREE.BufferAttribute(column, 3))
+    geometry.setAttribute('aTerrain', new THREE.BufferAttribute(terrain, 3))
 
     this.ringMaterial = new THREE.ShaderMaterial({
       vertexShader: GIRIH_VERTEX,
@@ -459,8 +523,10 @@ export class CosmosEngine {
         uLapis: { value: LAPIS },
         uCyan: { value: CYAN },
         uOpacity: { value: 1 },
-        // majorRadius + minorRadius — the extent the colour ramp maps across.
-        uRingHalfHeight: { value: 4.28 },
+        // Starts fully on the ring; scroll rebalances toward column then terrain.
+        uFormation: { value: new THREE.Vector3(1, 0, 0) },
+        uColorAxis: { value: new THREE.Vector2(...COLOR_AXIS.ring.axis) },
+        uColorScale: { value: COLOR_AXIS.ring.scale },
       },
     })
 
@@ -649,18 +715,18 @@ export class CosmosEngine {
     this.pointer.y = damp(this.pointer.y, this.targetPointer.y, 6, dt)
     this.pointerForce = damp(this.pointerForce, this.targetPointerForce, 5, dt)
 
-    // Camera: parallax from the pointer, dolly from the scene, plus a slow
-    // drift so the shot is never completely locked off.
-    this.camera.position.x = this.pointer.x * 0.85 + Math.sin(time * 0.07) * 0.14
-    this.camera.position.y = this.pointer.y * 0.6 + Math.cos(time * 0.06) * 0.1
-    this.camera.position.z = this.cameraZ
-    this.camera.lookAt(0, 0, 0)
+    const [wRing, wColumn, wTerrain] = formationWeights(this.journey)
 
-    // Ring rotation. Slow enough to feel like orbital mechanics, not a spinner.
-    // Spinning about Z keeps the lattice travelling *through* the fixed colour
-    // ramp, so the pattern moves while warm-top/cool-bottom stays anchored.
-    this.ring.rotation.z += dt * 0.035
-    this.ring.rotation.x = RING_TILT + Math.sin(time * 0.09) * 0.045
+    // Camera: parallax from the pointer, dolly from the scene, plus a slow
+    // drift so the shot is never completely locked off. As the terrain takes
+    // over, the camera lifts and tips down toward it — a landscape viewed dead
+    // level reads as a flat line rather than as ground receding to a horizon.
+    const lookY = -2.6 * wTerrain
+    this.camera.position.x = this.pointer.x * 0.85 + Math.sin(time * 0.07) * 0.14
+    this.camera.position.y =
+      this.pointer.y * 0.6 + Math.cos(time * 0.06) * 0.1 + wTerrain * 1.9
+    this.camera.position.z = this.cameraZ
+    this.camera.lookAt(0, lookY, 0)
 
     // Project the pointer onto the ring plane so the gravity well tracks the
     // cursor in world space rather than in screen space.
@@ -673,6 +739,34 @@ export class CosmosEngine {
     this.ringMaterial.uniforms.uJourney!.value = this.journey
     this.ringMaterial.uniforms.uDisperse!.value = this.disperse
     this.ringMaterial.uniforms.uOpacity!.value = this.ringOpacity
+
+    // ── Formation morph ──────────────────────────────────────────────────
+    this.ringMaterial.uniforms.uFormation!.value.set(wRing, wColumn, wTerrain)
+
+    // The colour ramp's axis and extent blend alongside the positions, so the
+    // gradient rotates with the shape instead of snapping when it hands over.
+    const axisX =
+      COLOR_AXIS.ring.axis[0] * wRing +
+      COLOR_AXIS.column.axis[0] * wColumn +
+      COLOR_AXIS.terrain.axis[0] * wTerrain
+    const axisY =
+      COLOR_AXIS.ring.axis[1] * wRing +
+      COLOR_AXIS.column.axis[1] * wColumn +
+      COLOR_AXIS.terrain.axis[1] * wTerrain
+
+    this.ringMaterial.uniforms.uColorAxis!.value.set(axisX, axisY)
+    this.ringMaterial.uniforms.uColorScale!.value =
+      COLOR_AXIS.ring.scale * wRing +
+      COLOR_AXIS.column.scale * wColumn +
+      COLOR_AXIS.terrain.scale * wTerrain
+
+    // Ring rotation, slow enough to read as orbital mechanics rather than a
+    // spinner. Spinning about Z carries the lattice *through* the fixed colour
+    // ramp, so the pattern moves while the ember/firouzeh poles stay anchored.
+    // Scaled by the ring's own weight: the terrain must not rotate, or the
+    // landscape rolls sideways as it takes over.
+    this.ring.rotation.z += dt * 0.035 * wRing
+    this.ring.rotation.x = RING_TILT * wRing + Math.sin(time * 0.09) * 0.045 * wRing
 
     // Age the ripples; a negative age marks the slot free.
     for (const ripple of this.ripples) {
