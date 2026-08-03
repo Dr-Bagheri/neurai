@@ -4,53 +4,46 @@
  * The background is the single largest performance risk in this design, so the
  * budget is decided up front from device signals rather than discovered by
  * dropping frames on a mid-range phone. Every tier must still look finished —
- * `low` is a quieter universe, not a broken one.
+ * `low` is a quieter scene, not a broken one.
  */
+
+import type { FormationOptions } from './formations'
 
 export type TierName = 'off' | 'low' | 'medium' | 'high'
 
 export type CosmosBudget = {
   tier: TierName
+  /** Striation lines × points per line. This is the main cost knob. */
+  formation: FormationOptions
   /** Stars per depth shell, far → near. */
   starCounts: readonly number[]
-  /** Particles in the background spiral galaxy. */
-  galaxyCount: number
   /** Device pixel ratio ceiling. Above ~2 the gain is invisible and the cost quadratic. */
   maxPixelRatio: number
-  /** Additive glow pass. First thing to go — it is the most expensive effect. */
-  bloom: boolean
-  /** Frames per second to target. */
   targetFps: number
-  /** Whether pointer interaction (gravity well, ripples) is enabled. */
   interactive: boolean
 }
 
 const BUDGETS: Record<Exclude<TierName, 'off'>, Omit<CosmosBudget, 'tier'>> = {
   high: {
-    // The galaxy is the whole background and the camera flies inside it, so it
-    // has to hold up close. This is the one number worth spending on.
-    starCounts: [2600, 1400, 700],
-    galaxyCount: 44000,
+    // Enough lines that the striations read as continuous curves rather than
+    // dotted ones — that continuity is the whole look.
+    formation: { lines: 280, pointsPerLine: 180 },
+    starCounts: [2400, 1200],
     maxPixelRatio: 2,
-    bloom: true,
     targetFps: 60,
     interactive: true,
   },
   medium: {
-    starCounts: [1500, 800, 380],
-    galaxyCount: 20000,
+    formation: { lines: 190, pointsPerLine: 130 },
+    starCounts: [1400, 700],
     maxPixelRatio: 1.75,
-    bloom: true,
     targetFps: 60,
     interactive: true,
   },
   low: {
-    starCounts: [700, 380, 0],
-    // Sparser, never absent — the galaxy *is* the design, so dropping it would
-    // leave nothing at all.
-    galaxyCount: 8000,
+    formation: { lines: 120, pointsPerLine: 90 },
+    starCounts: [700, 0],
     maxPixelRatio: 1.25,
-    bloom: false,
     targetFps: 30,
     interactive: false,
   },
@@ -68,8 +61,6 @@ export function shouldDisableCosmos(): boolean {
   const nav = navigator as NavigatorWithHints
   if (nav.connection?.saveData) return true
 
-  // No WebGL2 → we serve the static fallback instead of limping along on a
-  // WebGL1 path we would then have to maintain forever.
   try {
     const canvas = document.createElement('canvas')
     if (!canvas.getContext('webgl2')) return true
@@ -92,8 +83,7 @@ export function detectTier(): TierName {
   const slowNetwork = /(^|-)2g$/.test(nav.connection?.effectiveType ?? '')
 
   if (slowNetwork || cores <= 2 || memory <= 2) return 'low'
-  // Phones and tablets: capable silicon, but thermally limited and running on
-  // a battery. Medium is the honest ceiling.
+  // Phones and tablets: capable silicon, but thermally limited and on battery.
   if (coarsePointer || smallViewport) return cores >= 6 && memory >= 4 ? 'medium' : 'low'
   if (cores >= 8 && memory >= 8) return 'high'
   return 'medium'
