@@ -46,13 +46,22 @@
   --color-accent-dim: #3d8fa3;
 
   /* ── Type ──────────────────────────────────────────────────────────────────
-     One Persian family across the whole site, separated by weight rather than
-     by face — display sits at 200–300, body at 400. This mirrors the reference
-     direction (which uses a single family throughout) and halves the font
-     payload, which matters on Iranian mobile connections. */
-  --font-display: 'Vazirmatn Variable', ui-sans-serif, system-ui, sans-serif;
+     Three faces, each doing one job.
+
+     Estedad — display. Geometric and openly constructed, with counters that
+     stay open at the very light weights this design leans on. Vazirmatn is
+     excellent but its headline voice is neutral; Estedad has an actual accent,
+     which is what a brand face has to have.
+
+     Vazirmatn — body. Still the most legible Persian text face at small sizes,
+     and the one readers are most used to. Distinctiveness is a liability here.
+
+     Space Grotesk — Latin, numerals, the NEURAI wordmark. A technical
+     geometric grotesque; its slightly mechanical detailing sits naturally
+     against Estedad's geometry and suits the subject. */
+  --font-display: 'Estedad Variable', 'Vazirmatn Variable', ui-sans-serif, system-ui, sans-serif;
   --font-sans: 'Vazirmatn Variable', ui-sans-serif, system-ui, sans-serif;
-  --font-latin: 'Onest Variable', 'Vazirmatn Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-latin: 'Space Grotesk Variable', 'Vazirmatn Variable', ui-sans-serif, system-ui, sans-serif;
 
   /* Persian text needs more line-height than Latin — ascenders/descenders and
      diacritics collide at Latin defaults. */

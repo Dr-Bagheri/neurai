@@ -19,6 +19,7 @@ import path from 'node:path'
 
 import sharp from 'sharp'
 
+import { buildGalaxy } from '../src/components/cosmos/galaxy'
 import { buildGirihTorus, buildStarShell, DEFAULT_GIRIH } from '../src/components/cosmos/girih'
 
 const WIDTH = 1440
@@ -102,14 +103,66 @@ for (let y = 0; y < HEIGHT; y++) {
   for (let x = 0; x < WIDTH; x++) {
     const nx = x / WIDTH
     const ny = y / HEIGHT
-    // Weak on purpose — the composition is mostly unlit, and haze in the ring's
-    // centre is what separates "cinematic" from "muddy".
-    const warm = Math.exp(-(Math.hypot(nx - 0.82, ny - 0.02) ** 2) * 7.0) * 0.16
-    const cool = Math.exp(-(Math.hypot(nx - 0.14, ny - 0.96) ** 2) * 6.0) * 0.18
+    // Lifts the corners, not the middle — haze inside the ring's centre is what
+    // separates "cinematic" from "muddy".
+    const warm = Math.exp(-(Math.hypot(nx - 0.82, ny - 0.02) ** 2) * 7.0) * 0.3
+    const cool = Math.exp(-(Math.hypot(nx - 0.14, ny - 0.96) ** 2) * 6.0) * 0.34
     const index = (y * WIDTH + x) * 3
     buffer[index]! += EMBER[0] * warm + LAPIS[0] * cool
     buffer[index + 1]! += EMBER[1] * warm + LAPIS[1] * cool
     buffer[index + 2]! += EMBER[2] * warm + LAPIS[2] * cool
+  }
+}
+
+// The spiral galaxy, well behind the ring. Rendered with its own transform so
+// this preview reflects the real composition rather than the ring in isolation.
+{
+  const galaxy = buildGalaxy({ count: 26000 })
+  // Must match this.galaxy.position / .rotation in engine.ts.
+  const GX = -19
+  const GY = 7.5
+  const GZ = -30
+  const [rx, ry, rz] = [0.86, 0.24, 0.58]
+
+  const CORE: RGB = [255, 242, 214]
+
+  for (let i = 0; i < galaxy.count; i++) {
+    const r = galaxy.radius[i]!
+    const a = galaxy.angle[i]!
+    let x = Math.cos(a) * r
+    let y = galaxy.height[i]!
+    let z = Math.sin(a) * r
+
+    // Euler XYZ, matching THREE.Object3D default order.
+    let t = y * Math.cos(rx) - z * Math.sin(rx)
+    z = y * Math.sin(rx) + z * Math.cos(rx)
+    y = t
+    t = x * Math.cos(ry) + z * Math.sin(ry)
+    z = -x * Math.sin(ry) + z * Math.cos(ry)
+    x = t
+    t = x * Math.cos(rz) - y * Math.sin(rz)
+    y = x * Math.sin(rz) + y * Math.cos(rz)
+    x = t
+
+    const projected = project(x + GX, y + GY, z + GZ)
+    if (!projected) continue
+
+    const radial = clamp01(r / 26)
+    let color = mix(CORE, EMBER, smoothstep(0, 0.34, radial))
+    color = mix(color, LAPIS, smoothstep(0.34, 0.78, radial))
+    color = mix(color, CYAN, smoothstep(0.78, 1, radial) * 0.55)
+
+    const falloff = 1 + (0.05 - 1) * smoothstep(0, 0.68, radial)
+    const seed = galaxy.seed[i]!
+    const coreBoost = 1 + (1 - radial) * 2.2
+
+    addPoint(
+      projected.px,
+      projected.py,
+      color,
+      falloff * (0.5 + seed * 0.5) * 0.85,
+      Math.max(0.6, (1.35 * coreBoost * 26) / projected.depth / 9),
+    )
   }
 }
 

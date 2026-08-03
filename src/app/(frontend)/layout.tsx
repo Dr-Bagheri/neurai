@@ -1,5 +1,6 @@
 import '@fontsource-variable/vazirmatn'
-import '@fontsource-variable/onest'
+import '@fontsource-variable/estedad'
+import '@fontsource-variable/space-grotesk'
 import '@/styles/globals.css'
 
 import type { Metadata, Viewport } from 'next'

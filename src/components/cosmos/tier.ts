@@ -15,6 +15,8 @@ export type CosmosBudget = {
   girihCells: { cellsU: number; cellsV: number; pointsPerSegment: number }
   /** Stars per depth shell, far → near. */
   starCounts: readonly number[]
+  /** Particles in the background spiral galaxy. */
+  galaxyCount: number
   /** Device pixel ratio ceiling. Above ~2 the gain is invisible and the cost quadratic. */
   maxPixelRatio: number
   /** Additive glow pass. First thing to go — it is the most expensive effect. */
@@ -31,6 +33,7 @@ const BUDGETS: Record<Exclude<TierName, 'off'>, Omit<CosmosBudget, 'tier'>> = {
     // than a dotted outline — that continuity is what makes the ring glow.
     girihCells: { cellsU: 28, cellsV: 6, pointsPerSegment: 11 },
     starCounts: [2600, 1400, 700],
+    galaxyCount: 26000,
     maxPixelRatio: 2,
     bloom: true,
     targetFps: 60,
@@ -39,6 +42,7 @@ const BUDGETS: Record<Exclude<TierName, 'off'>, Omit<CosmosBudget, 'tier'>> = {
   medium: {
     girihCells: { cellsU: 22, cellsV: 5, pointsPerSegment: 7 },
     starCounts: [1500, 800, 380],
+    galaxyCount: 12000,
     maxPixelRatio: 1.75,
     bloom: true,
     targetFps: 60,
@@ -47,6 +51,9 @@ const BUDGETS: Record<Exclude<TierName, 'off'>, Omit<CosmosBudget, 'tier'>> = {
   low: {
     girihCells: { cellsU: 16, cellsV: 4, pointsPerSegment: 5 },
     starCounts: [700, 380, 0],
+    // Still present, just sparser — the galaxy is the main light source on the
+    // home page, so dropping it entirely would leave the page noticeably dead.
+    galaxyCount: 4500,
     maxPixelRatio: 1.25,
     bloom: false,
     targetFps: 30,

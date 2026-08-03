@@ -287,13 +287,18 @@ outside the page slot. Navigation retargets the camera instead of rebuilding the
 context, which is what makes moving through the site read as one continuous shot
 rather than a sequence of page loads.
 
+Five layers, drawn back to front: nebula → galaxy → star shells → girih ring.
+
 ```mermaid
 flowchart LR
     subgraph build["Build once, on boot"]
         girih["buildGirihTorus()<br/>ten-pointed shamseh lattice<br/>wrapped on a torus"]
         forms["buildFormations()<br/>column + terrain targets<br/>from the same u,v,seed"]
+        gal["buildGalaxy()<br/>polar coords: radius, angle, height<br/>4 logarithmic arms + bulge"]
         girih --> forms
     end
+
+    gal --> galshader["Galaxy vertex shader<br/>angle += time · spin / (radius + k)<br/>differential rotation"]
 
     subgraph gpu["Vertex shader · every frame"]
         blend["pos = ring·w0 + column·w1 + terrain·w2<br/>weights always sum to 1"]

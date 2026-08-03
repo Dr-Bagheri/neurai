@@ -18,6 +18,7 @@
 
 import * as THREE from 'three'
 
+import { buildGalaxy, DEFAULT_GALAXY } from './galaxy'
 import { buildFormations, buildGirihTorus, buildStarShell } from './girih'
 import type { CosmosBudget } from './tier'
 
@@ -48,6 +49,8 @@ const LAPIS = new THREE.Color('#2f5bd0')
 const CYAN = new THREE.Color('#8fe3ff')
 const STAR_WARM = new THREE.Color('#f0dcc4')
 const STAR_COOL = new THREE.Color('#bcd6e8')
+/** Galactic core — hot white with a gold cast, the brightest thing on the page. */
+const GALAXY_CORE = new THREE.Color('#fff2d6')
 
 /** Soft radial sprite, generated at runtime so there is no image to download. */
 function createSpriteTexture(): THREE.Texture {
@@ -304,6 +307,77 @@ const STAR_FRAGMENT = /* glsl */ `
   }
 `
 
+const GALAXY_VERTEX = /* glsl */ `
+  attribute float aRadius;
+  attribute float aAngle;
+  attribute float aHeight;
+  attribute float aSeed;
+
+  uniform float uTime;
+  uniform float uPixelRatio;
+  uniform float uSize;
+  uniform float uSpin;
+  uniform float uOuterRadius;
+
+  varying float vSeed;
+  varying float vRadial;   // 0 at the core, 1 at the rim
+
+  void main() {
+    // Differential rotation: angular velocity falls with radius, so the arms
+    // trail and wind over time the way a real disc does. Rotating the whole
+    // mesh rigidly instead would read as a spinning picture of a galaxy.
+    float angle = aAngle + uTime * uSpin / (aRadius * 0.16 + 0.6);
+
+    vec3 pos = vec3(cos(angle) * aRadius, aHeight, sin(angle) * aRadius);
+
+    vRadial = clamp(aRadius / uOuterRadius, 0.0, 1.0);
+    vSeed = aSeed;
+
+    vec4 mv = modelViewMatrix * vec4(pos, 1.0);
+    gl_Position = projectionMatrix * mv;
+
+    // Core stars are larger and brighter; rim stars are dust.
+    float coreBoost = 1.0 + (1.0 - vRadial) * 2.2;
+    float twinkle = 0.75 + 0.25 * sin(uTime * 0.7 + aSeed * 50.0);
+    gl_PointSize = uSize * uPixelRatio * coreBoost * twinkle * (26.0 / -mv.z);
+  }
+`
+
+const GALAXY_FRAGMENT = /* glsl */ `
+  precision highp float;
+
+  uniform vec3  uCore;
+  uniform vec3  uEmber;
+  uniform vec3  uLapis;
+  uniform vec3  uCyan;
+  uniform float uOpacity;
+
+  varying float vSeed;
+  varying float vRadial;
+
+  void main() {
+    vec2 uv = gl_PointCoord - 0.5;
+    float d = length(uv);
+    if (d > 0.5) discard;
+    float alpha = smoothstep(0.5, 0.05, d);
+
+    // Radial colour temperature, as in a real spiral: hot white-gold core,
+    // ember mid-disc, cool blue outer arms where young stars sit.
+    vec3 color = mix(uCore, uEmber, smoothstep(0.0, 0.34, vRadial));
+    color = mix(color, uLapis, smoothstep(0.34, 0.78, vRadial));
+    color = mix(color, uCyan, smoothstep(0.78, 1.0, vRadial) * 0.55);
+
+    // Brightness falls steeply outward, which is what makes the core read as a
+    // light source rather than as the middle of an evenly lit disc. The rim
+    // goes almost to nothing on purpose: at this distance, faintly-lit outer
+    // particles resolve as isolated specks that look like dead pixels rather
+    // than like dust.
+    float falloff = mix(1.0, 0.05, smoothstep(0.0, 0.68, vRadial));
+
+    gl_FragColor = vec4(color, alpha * uOpacity * falloff * (0.5 + vSeed * 0.5));
+  }
+`
+
 const NEBULA_VERTEX = /* glsl */ `
   varying vec2 vUv;
   void main() {
@@ -377,13 +451,18 @@ const COLOR_AXIS = {
   terrain: { axis: [1, 0.12] as const, scale: 13.0 },
 } as const
 
-const SCENE_STATE: Record<SceneName, { disperse: number; cameraZ: number; ringOpacity: number }> = {
-  // Home: the ring is the subject, framed whole with a little breathing room.
-  home: { disperse: 0, cameraZ: 8.7, ringOpacity: 1 },
+const SCENE_STATE: Record<
+  SceneName,
+  { disperse: number; cameraZ: number; ringOpacity: number; galaxyOpacity: number }
+> = {
+  // Home: the ring is the subject and the galaxy is the light behind it.
+  home: { disperse: 0, cameraZ: 8.7, ringOpacity: 1, galaxyOpacity: 1 },
   // Inner pages: pull back and loosen it so it reads as environment, not subject.
-  inner: { disperse: 0.55, cameraZ: 11.5, ringOpacity: 0.5 },
+  inner: { disperse: 0.55, cameraZ: 11.5, ringOpacity: 0.5, galaxyOpacity: 0.42 },
   // Long-form reading: further still, and dim enough to never fight the text.
-  reading: { disperse: 1.05, cameraZ: 14.5, ringOpacity: 0.26 },
+  // The galaxy dims hardest — it is the brightest object, so it is the one that
+  // would cost legibility behind a column of Persian body copy.
+  reading: { disperse: 1.05, cameraZ: 14.5, ringOpacity: 0.26, galaxyOpacity: 0.16 },
 }
 
 /** Frame-rate-independent easing toward a target. */
@@ -429,6 +508,8 @@ export class CosmosEngine {
   private starMaterials: THREE.ShaderMaterial[] = []
   private nebula!: THREE.Mesh
   private nebulaMaterial!: THREE.ShaderMaterial
+  private galaxy!: THREE.Points
+  private galaxyMaterial!: THREE.ShaderMaterial
 
   private budget: CosmosBudget
   private reducedMotion: boolean
@@ -448,6 +529,7 @@ export class CosmosEngine {
   private disperse = 0
   private cameraZ = SCENE_STATE.home.cameraZ
   private ringOpacity = 1
+  private galaxyOpacity = 1
 
   private ripples: THREE.Vector4[] = Array.from(
     { length: MAX_RIPPLES },
@@ -476,6 +558,7 @@ export class CosmosEngine {
     this.sprite = createSpriteTexture()
 
     this.buildNebula()
+    this.buildGalaxy()
     this.buildStars()
     this.buildRing()
 
@@ -540,6 +623,61 @@ export class CosmosEngine {
     this.scene.add(this.ring)
   }
 
+  private buildGalaxy() {
+    const cloud = buildGalaxy({ count: this.budget.galaxyCount })
+
+    const geometry = new THREE.BufferGeometry()
+    // A dummy `position` attribute keeps three.js's frustum culling and draw
+    // count happy; the real position is reconstructed from polar coordinates
+    // in the vertex shader.
+    geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(cloud.count * 3), 3))
+    geometry.setAttribute('aRadius', new THREE.BufferAttribute(cloud.radius, 1))
+    geometry.setAttribute('aAngle', new THREE.BufferAttribute(cloud.angle, 1))
+    geometry.setAttribute('aHeight', new THREE.BufferAttribute(cloud.height, 1))
+    geometry.setAttribute('aSeed', new THREE.BufferAttribute(cloud.seed, 1))
+    // Culling would pop the whole disc out of view, since the dummy positions
+    // put every vertex at the origin.
+    geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(), DEFAULT_GALAXY.radius * 1.2)
+
+    this.galaxyMaterial = new THREE.ShaderMaterial({
+      vertexShader: GALAXY_VERTEX,
+      fragmentShader: GALAXY_FRAGMENT,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      uniforms: {
+        uTime: { value: 0 },
+        uPixelRatio: { value: this.renderer.getPixelRatio() },
+        uSize: { value: 1.35 },
+        uSpin: { value: 0.85 },
+        uOuterRadius: { value: DEFAULT_GALAXY.radius },
+        uCore: { value: GALAXY_CORE },
+        uEmber: { value: EMBER },
+        uLapis: { value: LAPIS },
+        uCyan: { value: CYAN },
+        uOpacity: { value: 1 },
+      },
+    })
+
+    this.galaxy = new THREE.Points(geometry, this.galaxyMaterial)
+
+    // Deliberately off-axis, up and to the left, spilling past the frame edge.
+    //
+    // Centred behind the ring it sat squarely in the ring's opening — which is
+    // exactly where the hero headline goes. A bright galactic core behind
+    // Persian body text destroys legibility, and two concentric round objects
+    // read as a target rather than as depth. Pushed into the corner it does
+    // what it should: light the scene from behind and suggest scale.
+    //
+    // Upper-left is also the *end* of the reading path in RTL, so it draws the
+    // eye onward rather than fighting the headline for first attention.
+    this.galaxy.position.set(-19, 7.5, -30)
+    // Tilted enough to read as a disc in perspective, not so steep it collapses
+    // to an edge-on line.
+    this.galaxy.rotation.set(0.86, 0.24, 0.58)
+    this.scene.add(this.galaxy)
+  }
+
   private buildStars() {
     const radii = [46, 30, 19]
 
@@ -560,11 +698,11 @@ export class CosmosEngine {
         uniforms: {
           uTime: { value: 0 },
           uPixelRatio: { value: this.renderer.getPixelRatio() },
-          uSize: { value: 1.5 + index * 0.75 },
+          uSize: { value: 1.8 + index * 0.85 },
           uDrift: { value: 0.16 * (index + 1) },
           uWarm: { value: STAR_WARM },
           uCool: { value: STAR_COOL },
-          uOpacity: { value: 0.85 - index * 0.12 },
+          uOpacity: { value: 1.05 - index * 0.1 },
           uJourney: { value: 0 },
         },
       })
@@ -589,10 +727,10 @@ export class CosmosEngine {
         uJourney: { value: 0 },
         uEmber: { value: EMBER },
         uLapis: { value: LAPIS },
-        // Kept low deliberately. The reference composition is mostly *unlit* —
-        // the drama comes from a bright ring against genuinely black space, and
-        // a strong nebula fills the ring's centre with haze and kills it.
-        uOpacity: { value: 0.22 },
+        // Raised now that the galaxy carries the composition's light. Still
+        // restrained: haze inside the ring's centre is what would turn this
+        // from cinematic to muddy, so the nebula lifts the corners, not the middle.
+        uOpacity: { value: 0.44 },
       },
     })
     this.nebula = new THREE.Mesh(geometry, this.nebulaMaterial)
@@ -643,6 +781,7 @@ export class CosmosEngine {
     this.camera.updateProjectionMatrix()
 
     this.ringMaterial.uniforms.uPixelRatio!.value = pixelRatio
+    this.galaxyMaterial.uniforms.uPixelRatio!.value = pixelRatio
     for (const material of this.starMaterials) {
       material.uniforms.uPixelRatio!.value = pixelRatio
     }
@@ -711,6 +850,7 @@ export class CosmosEngine {
     this.disperse = damp(this.disperse, target.disperse, 2.2, dt)
     this.cameraZ = damp(this.cameraZ, target.cameraZ, 2.2, dt)
     this.ringOpacity = damp(this.ringOpacity, target.ringOpacity, 3, dt)
+    this.galaxyOpacity = damp(this.galaxyOpacity, target.galaxyOpacity, 3, dt)
     this.pointer.x = damp(this.pointer.x, this.targetPointer.x, 6, dt)
     this.pointer.y = damp(this.pointer.y, this.targetPointer.y, 6, dt)
     this.pointerForce = damp(this.pointerForce, this.targetPointerForce, 5, dt)
@@ -780,6 +920,16 @@ export class CosmosEngine {
       material.uniforms.uTime!.value = time
       material.uniforms.uJourney!.value = this.journey
     }
+
+    this.galaxyMaterial.uniforms.uTime!.value = time
+    // Fades out as the scroll journey advances as well as by route: by the time
+    // the terrain takes over we are conceptually somewhere else entirely.
+    this.galaxyMaterial.uniforms.uOpacity!.value =
+      this.galaxyOpacity * (1 - this.journey * 0.72)
+
+    // A slow drift of the whole disc, on top of the shader's differential
+    // rotation, so the galaxy never looks pinned to the viewport.
+    this.galaxy.rotation.z += dt * 0.006
 
     this.nebulaMaterial.uniforms.uTime!.value = time
     this.nebulaMaterial.uniforms.uJourney!.value = this.journey
