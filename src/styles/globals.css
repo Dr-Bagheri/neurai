@@ -236,24 +236,51 @@
     .reveal {
       animation: reveal-in linear both;
       animation-timeline: view();
-      /* Enters over the last 35% of approach, holds, leaves over the first 25%
-         of exit. The long middle is the "solid" state. */
-      animation-range: entry 10% cover 38%;
+      /* Enters over the last stretch of approach, holds, leaves on exit. The
+         long middle is the "solid" state. */
+      animation-range: entry 8% cover 40%;
     }
 
     .reveal-out {
       animation: reveal-out linear both;
       animation-timeline: view();
-      animation-range: cover 68% exit 90%;
+      animation-range: cover 66% exit 92%;
+    }
+
+    /* Continuous drift across the *whole* pass, independent of enter/leave.
+       This is what makes the copy feel attached to the scene rather than
+       parked on top of it: even at full opacity it is still travelling. */
+    .drift {
+      animation: drift linear both;
+      animation-timeline: view();
+      animation-range: cover 0% cover 100%;
     }
   }
+}
+
+/*
+  Pointer parallax.
+
+  Only the easing lives here — the `translate` value itself is written from
+  JavaScript (see CosmosCanvas). A pure-CSS version using
+  `translate: calc(var(--pointer-x) …)` resolved to 0 for elements in normal
+  flow while working for absolutely-positioned ones, and I could not isolate
+  why: it survived being cloned elsewhere in the document, and stripping both
+  ancestor and descendant scroll-animations changed nothing. Rather than ship a
+  mechanism whose failure mode I don't understand, the value is set directly.
+
+  `data-depth` on an element opts it in and sets its rate.
+*/
+@utility parallax {
+  transition: translate 700ms var(--ease-out-soft);
+  will-change: translate;
 }
 
 @keyframes reveal-in {
   from {
     opacity: 0;
-    transform: translateY(3.5rem) scale(0.97);
-    filter: blur(6px);
+    transform: translateY(4rem) scale(0.96);
+    filter: blur(7px);
   }
   to {
     opacity: 1;
@@ -270,8 +297,19 @@
   }
   to {
     opacity: 0;
-    transform: translateY(-2.5rem) scale(0.985);
-    filter: blur(5px);
+    transform: translateY(-3rem) scale(0.98);
+    filter: blur(6px);
+  }
+}
+
+/* Travels upward through the section at a different rate to the page scroll,
+   so content and background move together but not in lockstep. */
+@keyframes drift {
+  from {
+    transform: translateY(5rem);
+  }
+  to {
+    transform: translateY(-5rem);
   }
 }
 

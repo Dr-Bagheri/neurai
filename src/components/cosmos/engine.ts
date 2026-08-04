@@ -81,14 +81,28 @@ const PARTICLE_VERTEX = /* glsl */ `
   uniform float uSpin;       // scaled down for the terrain, which must not rotate
   uniform float uDeshape;    // peaks mid-transition
   uniform float uCoreGlow;
+  uniform float uTexture;    // drifts the density field so texture evolves with the scene
   uniform vec4  uRipples[${MAX_RIPPLES}];
 
   varying float vSeed;
   varying float vRamp;   // 0..1 along the colour axis
   varying float vDepth;
   varying float vBoost;
+  varying float vDust;   // 0..1 galactic density — clumps and dust lanes
+  varying float vKnot;   // 1 for the rare bright star knots
 
   ${NOISE_GLSL}
+
+  float fbm4(vec3 p) {
+    float total = 0.0;
+    float amp = 0.5;
+    for (int i = 0; i < 4; i++) {
+      total += noise(p) * amp;
+      p *= 2.11;
+      amp *= 0.5;
+    }
+    return total;
+  }
 
   void main() {
     // Blend the five formations. Weights always sum to 1, so this is a true
@@ -132,6 +146,26 @@ const PARTICLE_VERTEX = /* glsl */ `
     vSeed = aSeed;
     vBoost = clamp(boost, 0.0, 1.5);
 
+    // ── Galactic texture ──────────────────────────────────────────────────
+    // A uniform lattice of identically-bright dots reads as a wireframe mesh.
+    // Real galaxies are lumpy: bright knots of star formation, long dark dust
+    // lanes, and broad density gradients between them. Two octave bands do the
+    // work — a coarse one for the large-scale structure and a fine one for the
+    // grain — multiplied together so dust lanes cut across clumps rather than
+    // averaging into an even haze.
+    //
+    // The noise field is sampled in *object* space and drifts with uTexture, so
+    // the texture reorganises as the formation changes rather than sitting on
+    // the particles like a decal.
+    float coarse = fbm4(pos * 0.055 + vec3(0.0, 0.0, uTexture));
+    float fine   = noise(pos * 0.42 + vec3(uTexture * 0.7, 0.0, 0.0));
+    vDust = clamp(smoothstep(0.28, 0.72, coarse) * (0.45 + fine * 0.9), 0.0, 1.4);
+
+    // A small fraction of particles are bright knots. Threshold on the seed so
+    // the same particles stay knots frame to frame — flickering knots read as
+    // noise rather than as stars.
+    vKnot = step(0.972, aSeed) * step(0.35, coarse);
+
     vec4 mv = modelViewMatrix * vec4(pos, 1.0);
     gl_Position = projectionMatrix * mv;
 
@@ -144,7 +178,11 @@ const PARTICLE_VERTEX = /* glsl */ `
     vDepth = depth;
 
     float twinkle = 0.7 + 0.3 * sin(uTime * 0.9 + aSeed * 48.0);
-    gl_PointSize = uSize * uPixelRatio * twinkle * (1.0 + vBoost + uCoreGlow * 0.8) * (26.0 / depth);
+    // Dot size stays constant — the texture comes from brightness, not scale.
+    // Only the rare knots grow, and only slightly.
+    float knotSize = 1.0 + vKnot * 0.9;
+    gl_PointSize = uSize * uPixelRatio * twinkle * knotSize
+                 * (1.0 + vBoost + uCoreGlow * 0.8) * (26.0 / depth);
   }
 `
 
@@ -164,6 +202,8 @@ const PARTICLE_FRAGMENT = /* glsl */ `
   varying float vRamp;
   varying float vDepth;
   varying float vBoost;
+  varying float vDust;
+  varying float vKnot;
 
   void main() {
     vec2 uv = gl_PointCoord - 0.5;
@@ -178,6 +218,14 @@ const PARTICLE_FRAGMENT = /* glsl */ `
     color      = mix(color,  uRed,     smoothstep(0.66, 0.86, vRamp));
     color      = mix(color,  uWarm,    smoothstep(0.86, 1.00, vRamp));
 
+    // Dense regions run hotter, sparse ones cooler — the same relationship
+    // real galaxies show, where young blue stars sit in the crowded arms and
+    // the thin regions between them are older and redder. It also stops the
+    // colour ramp reading as a flat gradient laid over the geometry.
+    color = mix(color * 0.72, color, smoothstep(0.0, 0.9, vDust));
+
+    // Knots burn toward white.
+    color = mix(color, vec3(1.0), vKnot * 0.55);
     color = mix(color, vec3(1.0), clamp(vBoost * 0.5, 0.0, 0.6));
 
     // Distance attenuation. Near particles are brighter, which is what gives
@@ -185,7 +233,11 @@ const PARTICLE_FRAGMENT = /* glsl */ `
     // surface, so far more emitting material lies on that sight line.
     float atten = clamp(22.0 / vDepth, 0.15, 1.9);
 
-    gl_FragColor = vec4(color, alpha * uOpacity * atten * (0.32 + vSeed * 0.5));
+    // Density drives brightness. This is the whole texture: the lattice is
+    // still regular, but what you *see* is clumps, lanes and knots.
+    float density = 0.1 + vDust * 1.15 + vKnot * 1.6;
+
+    gl_FragColor = vec4(color, alpha * uOpacity * atten * density * (0.3 + vSeed * 0.42));
   }
 `
 
@@ -335,6 +387,7 @@ export class CosmosEngine {
         uSpin: { value: 0.05 },
         uDeshape: { value: 0 },
         uCoreGlow: { value: 0 },
+        uTexture: { value: 0 },
         uRipples: { value: this.ripples },
         uBlue: { value: C_BLUE },
         uIndigo: { value: C_INDIGO },
@@ -542,6 +595,10 @@ export class CosmosEngine {
     // ── Uniforms ─────────────────────────────────────────────────────────
     this.particleMaterial.uniforms.uTime!.value = time
     this.particleMaterial.uniforms.uCoreGlow!.value = this.coreGlow
+    // Drift the density field slowly, and shift it further as the journey
+    // advances, so each formation carries its own texture rather than wearing
+    // the previous one's.
+    this.particleMaterial.uniforms.uTexture!.value = time * 0.012 + this.journey * 2.6
     this.particleMaterial.uniforms.uOpacity!.value = this.opacity
 
     for (const ripple of this.ripples) {

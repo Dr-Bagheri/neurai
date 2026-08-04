@@ -15,7 +15,7 @@ import { Pill } from '@/components/ui/Pill'
 export function Hero() {
   return (
     <section className="relative flex min-h-dvh flex-col items-center justify-between px-6 py-28 text-center">
-      <div className="flex flex-col items-center">
+      <div className="parallax flex flex-col items-center" data-depth="1.2">
         <Pill icon={<Sparkles />}>به عصر تازه خوش آمدید</Pill>
 
         {/* Two-tone: the sentence opens bright and its final clause recedes.

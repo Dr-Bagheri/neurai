@@ -29,8 +29,12 @@ export function FloatingStat({
 }) {
   return (
     <figure
+      // Near cards ride the pointer harder than far ones — the differing rate
+      // is what separates them in depth. Matching rates would just slide the
+      // whole group as one plate.
+      data-depth={depth === 'near' ? 2.4 : 1.1}
       className={cn(
-        'pointer-events-none absolute w-[min(21rem,72vw)] rounded-2xl border border-hairline p-6 backdrop-blur-xl',
+        'parallax pointer-events-none absolute w-[min(21rem,72vw)] rounded-2xl border border-hairline p-6 backdrop-blur-xl',
         depth === 'near'
           ? 'bg-void-950/70 shadow-[0_0_80px_-30px_rgba(180,120,245,0.5)]'
           : 'scale-90 bg-void-950/45 opacity-70',

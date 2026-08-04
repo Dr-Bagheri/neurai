@@ -95,12 +95,39 @@ export function CosmosCanvas() {
       frame = requestAnimationFrame(readScroll)
     }
 
+    /**
+     * Move the parallax layers with the scene.
+     *
+     * Written directly rather than through a CSS custom property: the pure-CSS
+     * form silently resolved to zero for elements in normal flow. Elements opt
+     * in with `data-depth`, and the differing rates are what separate them —
+     * matching rates would just slide everything as one plate.
+     *
+     * The node list is re-queried per move rather than cached because sections
+     * mount and unmount with client-side navigation; the count is small enough
+     * (a dozen) that this is cheaper than maintaining a subscription.
+     */
+    const moveParallax = (nx: number, ny: number) => {
+      const layers = document.querySelectorAll<HTMLElement>('[data-depth]')
+      for (const layer of layers) {
+        const depth = Number(layer.dataset.depth) || 1
+        layer.style.translate = `${((nx - 0.5) * -26 * depth).toFixed(2)}px ${(
+          (ny - 0.5) *
+          -16 *
+          depth
+        ).toFixed(2)}px`
+      }
+    }
+
     const onPointerMove = (event: PointerEvent) => {
       const x = (event.clientX / window.innerWidth) * 2 - 1
       const y = -((event.clientY / window.innerHeight) * 2 - 1)
+      const nx = event.clientX / window.innerWidth
+      const ny = event.clientY / window.innerHeight
 
-      root.style.setProperty('--pointer-x', (event.clientX / window.innerWidth).toFixed(4))
-      root.style.setProperty('--pointer-y', (event.clientY / window.innerHeight).toFixed(4))
+      root.style.setProperty('--pointer-x', nx.toFixed(4))
+      root.style.setProperty('--pointer-y', ny.toFixed(4))
+      moveParallax(nx, ny)
       engineRef.current?.setPointer(x, y, true)
 
       // The core has no button and no visible affordance — brightening is the
@@ -115,6 +142,9 @@ export function CosmosCanvas() {
 
     const onPointerLeave = () => {
       engineRef.current?.setPointer(0, 0, false)
+      // Ease the layers back to rest rather than leaving them stuck at whatever
+      // offset the cursor had when it left the window.
+      moveParallax(0.5, 0.5)
       overCore.current = false
       root.dataset.coreHover = 'false'
       setCoreHover(false)

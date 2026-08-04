@@ -51,28 +51,58 @@ export function Section({
         className,
       )}
     >
-      <div className="reveal mx-auto w-full max-w-7xl">
-        <div className="reveal-out grid gap-x-16 gap-y-10 lg:grid-cols-2">
-          <header>
-            {eyebrow ? <Pill className="mb-7">{eyebrow}</Pill> : null}
-            <h2 className="font-display text-4xl leading-fa-tight font-light text-text-100 sm:text-5xl lg:text-6xl">
-              {title} {titleTail ? <span className="heading-tail">{titleTail}</span> : null}
-            </h2>
-          </header>
+      {/*
+        Layer order matters and is load-bearing.
 
-          {/* Offset down from the heading so the two columns don't align into a
-              tidy row — the misalignment is what makes it read as unstructured. */}
-          <div className="lg:pt-20">
-            {lead ? (
-              <p className="max-w-md text-base leading-fa-normal text-text-300 sm:text-lg">
-                {lead}
-              </p>
-            ) : null}
-            {actions ? <div className="mt-8 flex flex-wrap gap-4">{actions}</div> : null}
+        `parallax` must sit OUTSIDE the scroll-driven animation wrappers. When
+        it is nested inside them the `translate` property silently resolves to
+        0 — verified by probing the live page: an identical element cloned out
+        of the animated subtree parallaxes correctly, the original never moves.
+
+        So each column gets its own parallax wrapper (giving per-block depth, so
+        the heading and body separate as the cursor moves rather than sliding as
+        one plate), and the arrival/departure animations live inside it:
+
+          parallax → drift → reveal → reveal-out → content
+      */}
+      <div className="mx-auto grid w-full max-w-7xl gap-x-16 gap-y-10 lg:grid-cols-2">
+        <div className="parallax" data-depth="1.5">
+          <div className="drift">
+            <div className="reveal">
+              <header className="reveal-out">
+                {eyebrow ? <Pill className="mb-7">{eyebrow}</Pill> : null}
+                <h2 className="font-display text-4xl leading-fa-tight font-light text-text-100 sm:text-5xl lg:text-6xl">
+                  {title} {titleTail ? <span className="heading-tail">{titleTail}</span> : null}
+                </h2>
+              </header>
+            </div>
           </div>
-
-          {children ? <div className="lg:col-span-2">{children}</div> : null}
         </div>
+
+        {/* Offset down from the heading so the two columns never align into a
+            tidy row — the misalignment is what reads as unstructured. */}
+        <div className="parallax lg:pt-20" data-depth="0.7">
+          <div className="drift">
+            <div className="reveal">
+              <div className="reveal-out">
+                {lead ? (
+                  <p className="max-w-md text-base leading-fa-normal text-text-300 sm:text-lg">
+                    {lead}
+                  </p>
+                ) : null}
+                {actions ? <div className="mt-8 flex flex-wrap gap-4">{actions}</div> : null}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {children ? (
+          <div className="lg:col-span-2">
+            <div className="reveal">
+              <div className="reveal-out">{children}</div>
+            </div>
+          </div>
+        ) : null}
       </div>
     </section>
   )
